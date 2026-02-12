@@ -57,6 +57,11 @@ html, body {
   color: #d4d4d4;
 }
 
+.line-comment {
+  color: #6a9955;
+  font-style: italic;
+}
+
 .line-snapshot {
   color: #9cdcfe;
   font-size: 12px;

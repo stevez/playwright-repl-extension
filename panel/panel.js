@@ -8,6 +8,9 @@
   const saveBtn = document.getElementById("save-btn");
   const clearBtn = document.getElementById("clear-btn");
 
+  // The tab we're inspecting
+  const inspectedTabId = chrome.devtools.inspectedWindow.tabId;
+
   // Command history
   const history = [];
   let historyIndex = -1;
@@ -41,32 +44,74 @@
     addLine(text, "line-info");
   }
 
-  // --- Command execution (stub for Phase 1) ---
+  function addSnapshot(text) {
+    addLine(text, "line-snapshot");
+  }
+
+  function addScreenshot(base64) {
+    const div = document.createElement("div");
+    div.className = "line line-screenshot";
+    const img = document.createElement("img");
+    img.src = "data:image/png;base64," + base64;
+    div.appendChild(img);
+    output.appendChild(div);
+    output.scrollTop = output.scrollHeight;
+  }
+
+  function addComment(text) {
+    addLine(text, "line-comment");
+  }
+
+  // --- Command execution via background service worker ---
 
   async function executeCommand(raw) {
     const trimmed = raw.trim();
     if (!trimmed) return;
 
+    // Skip comments
+    if (trimmed.startsWith("#")) {
+      addComment(trimmed);
+      return;
+    }
+
     commandLog.push(trimmed);
     addCommand(trimmed);
 
-    // Phase 1: echo-only — real CDP execution comes in Phase 2
-    const [cmd, ...args] = trimmed.split(/\s+/);
-    switch (cmd) {
-      case "help":
-        addInfo("Available commands:");
-        addInfo("  goto <url>       Navigate to URL");
-        addInfo("  click <target>   Click an element");
-        addInfo("  fill <target> <value>  Fill a field");
-        addInfo("  press <key>      Press a key");
-        addInfo("  snapshot         Show accessibility tree");
-        addInfo("  screenshot       Capture screenshot");
-        addInfo("  eval <expr>      Evaluate JS expression");
-        addInfo("  help             Show this help");
-        break;
-      default:
-        addInfo(`[Phase 1 stub] Command "${cmd}" will be executed via CDP in Phase 2.`);
-        break;
+    try {
+      const result = await chrome.runtime.sendMessage({
+        type: "pw-command",
+        raw: trimmed,
+        tabId: inspectedTabId,
+      });
+
+      if (!result) {
+        addError("No response from background worker.");
+        return;
+      }
+
+      switch (result.type) {
+        case "success":
+          addSuccess(result.data);
+          break;
+        case "error":
+          addError(result.data);
+          break;
+        case "info":
+          addInfo(result.data);
+          break;
+        case "snapshot":
+          for (const line of result.data.split("\n")) {
+            addSnapshot(line);
+          }
+          break;
+        case "screenshot":
+          addScreenshot(result.data);
+          break;
+        default:
+          addInfo(result.data || "Done.");
+      }
+    } catch (e) {
+      addError(`Error: ${e.message}`);
     }
   }
 
@@ -144,9 +189,14 @@
       const reader = new FileReader();
       reader.onload = () => {
         const lines = reader.result.split("\n").filter((l) => l.trim());
-        addInfo(`Loaded ${lines.length} commands from ${file.name}:`);
+        const commands = lines.filter((l) => !l.trim().startsWith("#"));
+        addInfo(`Loaded ${commands.length} commands from ${file.name}:`);
         for (const line of lines) {
-          addLine(line, "line-info");
+          if (line.trim().startsWith("#")) {
+            addComment(line);
+          } else {
+            addLine(line, "line-info");
+          }
         }
         // Enable play button for Phase 5 replay
         playBtn.disabled = false;
@@ -168,6 +218,6 @@
   input.focus();
 
   // Welcome message
-  addInfo("Playwright REPL — Phase 1");
+  addInfo("Playwright REPL v0.2");
   addInfo('Type "help" for available commands.');
 })();
