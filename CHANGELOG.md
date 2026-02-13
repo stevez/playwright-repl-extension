@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.8.0
+
+### Added
+
+- Verify commands for assertions during REPL sessions and `.pw` scripts:
+  - `verify-text "text"` -- assert text is visible on the page
+  - `verify-no-text "text"` -- assert text is NOT on the page
+  - `verify-element "target"` -- assert element exists (by text, aria-label, label)
+  - `verify-no-element "target"` -- assert element does NOT exist
+  - `verify-url "substring"` -- assert current URL contains a string
+  - `verify-title "text"` -- assert page title contains a string
+- Verify commands produce PASS/FAIL output with descriptive messages
+- Playwright export support for all verify commands (e.g. `verify-text` exports as `await expect(page.getByText(...)).toBeVisible()`)
+- 29 new tests for verify commands (241 total)
+
 ## v0.7.0
 
 ### Fixed

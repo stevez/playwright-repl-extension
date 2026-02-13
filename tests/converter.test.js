@@ -227,6 +227,61 @@ describe("pwToPlaywright", () => {
     expect(pwToPlaywright("reload")).toBe("await page.reload();");
   });
 
+  // verify commands
+  it("converts verify-text", () => {
+    expect(pwToPlaywright('verify-text "Hello"')).toBe(
+      'await expect(page.getByText("Hello")).toBeVisible();'
+    );
+  });
+
+  it("converts verify-no-text", () => {
+    expect(pwToPlaywright('verify-no-text "Gone"')).toBe(
+      'await expect(page.getByText("Gone")).not.toBeVisible();'
+    );
+  });
+
+  it("converts verify-element", () => {
+    expect(pwToPlaywright('verify-element "Submit"')).toBe(
+      'await expect(page.getByText("Submit")).toBeVisible();'
+    );
+  });
+
+  it("converts verify-no-element", () => {
+    expect(pwToPlaywright('verify-no-element "Deleted"')).toBe(
+      'await expect(page.getByText("Deleted")).not.toBeVisible();'
+    );
+  });
+
+  it("converts verify-url", () => {
+    expect(pwToPlaywright('verify-url "dashboard"')).toBe(
+      "await expect(page).toHaveURL(/dashboard/);"
+    );
+  });
+
+  it("converts verify-url with regex special chars", () => {
+    expect(pwToPlaywright('verify-url "example.com/path"')).toBe(
+      "await expect(page).toHaveURL(/example\\.com\\/path/);"
+    );
+  });
+
+  it("converts verify-title", () => {
+    expect(pwToPlaywright('verify-title "My App"')).toBe(
+      "await expect(page).toHaveTitle(/My App/);"
+    );
+  });
+
+  it("returns null for verify-text without arg", () => {
+    expect(pwToPlaywright("verify-text")).toBeNull();
+  });
+
+  it("returns null for verify-url without arg", () => {
+    expect(pwToPlaywright("verify-url")).toBeNull();
+  });
+
+  it("returns null for verify-title without arg", () => {
+    expect(pwToPlaywright("verify-title")).toBeNull();
+  });
+
   // unknown
   it("converts unknown command to comment", () => {
     expect(pwToPlaywright("foobar")).toBe("// unknown command: foobar");

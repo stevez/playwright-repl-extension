@@ -5,7 +5,7 @@ A Chrome DevTools extension that adds a REPL panel for Playwright-style browser 
 ## Features
 
 - **REPL panel** inside Chrome DevTools (next to Elements, Console, Network)
-- **20+ commands**: `goto`, `click`, `fill`, `select`, `check`, `press`, `snapshot`, `screenshot`, `eval`, and more
+- **25+ commands**: `goto`, `click`, `fill`, `select`, `check`, `press`, `verify-text`, `snapshot`, `screenshot`, `eval`, and more
 - **Action recorder**: toggle recording, interact with the page, and watch `.pw` commands appear in real time
 - **Load & replay** `.pw` files
 - **Export** sessions as Playwright TypeScript tests
@@ -49,6 +49,12 @@ pw> screenshot
 | `snapshot` | Show accessibility tree |
 | `screenshot [full]` | Capture screenshot (optional full page) |
 | `eval <expr>` | Evaluate JavaScript expression |
+| `verify-text "text"` | Assert text is visible on page |
+| `verify-no-text "text"` | Assert text is NOT on page |
+| `verify-element "target"` | Assert element exists |
+| `verify-no-element "target"` | Assert element does NOT exist |
+| `verify-url "substring"` | Assert URL contains string |
+| `verify-title "text"` | Assert page title contains string |
 | `go-back` / `back` | Navigate back |
 | `go-forward` / `forward` | Navigate forward |
 | `reload` | Reload the page |
@@ -150,7 +156,7 @@ playwright-repl-extension/
 │   ├── locators.js        # Element locator JS generation
 │   ├── formatter.js       # Accessibility tree formatter
 │   └── converter.js       # .pw --> Playwright TypeScript converter
-├── tests/                 # Vitest test suite (212 tests)
+├── tests/                 # Vitest test suite (241 tests)
 ├── icons/
 │   ├── icon16.png
 │   ├── icon48.png
