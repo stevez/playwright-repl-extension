@@ -1,16 +1,20 @@
 {
   "manifest_version": 3,
   "name": "Playwright REPL",
-  "version": "0.2.0",
+  "version": "0.5.0",
   "description": "A REPL panel inside Chrome DevTools for Playwright-style browser automation commands.",
   "devtools_page": "devtools.html",
   "permissions": [
-    "debugger"
+    "debugger",
+    "scripting"
   ],
   "background": {
     "service_worker": "background.js",
     "type": "module"
   },
+  "host_permissions": [
+    "<all_urls>"
+  ],
   "icons": {
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",
