@@ -1,6 +1,16 @@
 import { parseCommand } from "./lib/commands.js";
 import { buildClickElementJS, buildFocusElementJS } from "./lib/locators.js";
 import { formatAccessibilityTree } from "./lib/formatter.js";
+import {
+  callInPage,
+  selectElement,
+  checkElement,
+  hoverElement,
+  dblclickElement,
+  verifyElementExists,
+  verifyTextOnPage,
+  dispatchFillEvents,
+} from "./lib/page-scripts.js";
 
 console.log("[PW] background.js loaded v0.7");
 
@@ -186,7 +196,7 @@ async function startRecording(tabId) {
 
     // Use addScriptToEvaluateOnNewDocument so the recorder survives
     // page reloads and execution context resets
-    const recorderCode = getRecorderCode();
+    const recorderCode = await getRecorderCode();
     const addResult = await cdp(tabId, "Page.addScriptToEvaluateOnNewDocument", {
       source: recorderCode,
     });
@@ -255,191 +265,14 @@ async function stopRecording(tabId) {
   }
 }
 
-function getRecorderCode() {
-  return `(() => {
-  if (window.__pwRecorderActive) return;
-  window.__pwRecorderActive = true;
+let _recorderCodeCache = null;
 
-  function getLocator(el) {
-    const ariaLabel = el.getAttribute && el.getAttribute("aria-label");
-    if (ariaLabel) return quote(ariaLabel);
-
-    if (el.id) {
-      const label = document.querySelector('label[for="' + CSS.escape(el.id) + '"]');
-      if (label && label.textContent.trim()) return quote(label.textContent.trim());
-    }
-    const parentLabel = el.closest && el.closest("label");
-    if (parentLabel && parentLabel.textContent.trim()) {
-      return quote(parentLabel.textContent.trim());
-    }
-
-    if (el.placeholder) return quote(el.placeholder);
-
-    const text = el.textContent ? el.textContent.trim() : "";
-    if (text && text.length < 80 && el.children.length === 0) return quote(text);
-
-    if ((el.tagName === "BUTTON" || el.tagName === "A") && text && text.length < 80) {
-      return quote(text);
-    }
-
-    if (el.title) return quote(el.title);
-
-    const tag = el.tagName ? el.tagName.toLowerCase() : "unknown";
-    return quote(tag);
-  }
-
-  // Get the primary text of a container (e.g., a list item's label)
-  function getItemContext(el) {
-    const item = el.closest && el.closest("li, tr, [role=listitem], [role=row], article");
-    if (!item) return null;
-    // Look for a label, heading, or primary text element
-    const primary = item.querySelector("label, h1, h2, h3, h4, [class*=title], [class*=text], p, span");
-    if (primary && primary !== el && primary.textContent.trim()) {
-      const t = primary.textContent.trim();
-      if (t.length < 80) return t;
-    }
-    return null;
-  }
-
-  function quote(s) {
-    return '"' + s.replace(/"/g, '\\\\"') + '"';
-  }
-
-  function send(command) {
-    console.debug("__pw:" + command);
-  }
-
-  let fillTimer = null;
-  let fillTarget = null;
-  let fillValue = "";
-
-  function flushFill() {
-    if (fillTarget && fillValue) {
-      const locator = getLocator(fillTarget);
-      send('fill ' + locator + ' "' + fillValue.replace(/"/g, '\\\\"') + '"');
-    }
-    fillTimer = null;
-    fillTarget = null;
-    fillValue = "";
-  }
-
-  // Elements that are non-interactive containers — skip recording clicks on these
-  var skipTags = new Set(["HTML", "BODY", "MAIN", "FOOTER", "HEADER", "NAV", "SECTION", "ARTICLE", "DIV", "UL", "OL", "FORM", "FIELDSET", "TABLE", "TBODY", "THEAD", "TR"]);
-
-  function findCheckbox(el) {
-    // Check if el itself is a checkbox
-    if (el.tagName === "INPUT" && el.type === "checkbox") return el;
-    // Check if clicking a label that toggles a checkbox
-    if (el.tagName === "LABEL") {
-      var input = el.querySelector('input[type="checkbox"]');
-      if (input) return input;
-      if (el.htmlFor) {
-        var target = document.getElementById(el.htmlFor);
-        if (target && target.type === "checkbox") return target;
-      }
-    }
-    // Check only the immediate parent label (not li/div which are too broad)
-    var parentLabel = el.closest("label");
-    if (parentLabel) {
-      var cb = parentLabel.querySelector('input[type="checkbox"]');
-      if (cb) return cb;
-    }
-    return null;
-  }
-
-  function handleClick(e) {
-    try {
-      if (fillTimer) { clearTimeout(fillTimer); flushFill(); }
-      var el = e.target;
-      if (!el || !el.tagName) return;
-
-      // Skip text inputs and textareas
-      if ((el.tagName === "INPUT" && el.type !== "checkbox" && el.type !== "radio") || el.tagName === "TEXTAREA") return;
-
-      // Skip clicks on non-interactive container elements
-      if (skipTags.has(el.tagName) && !el.getAttribute("role") && !el.getAttribute("onclick")) return;
-
-      // Check for checkbox (direct or via label/parent)
-      var checkbox = findCheckbox(el);
-      if (checkbox) {
-        var cbLabel = getItemContext(checkbox) || "";
-        if (cbLabel) {
-          send(checkbox.checked ? 'check "' + cbLabel + '"' : 'uncheck "' + cbLabel + '"');
-        } else {
-          var loc = getLocator(checkbox);
-          send(checkbox.checked ? 'check ' + loc : 'uncheck ' + loc);
-        }
-        return;
-      }
-
-      var locator = getLocator(el);
-      // Detect action buttons (Delete, Remove, Edit, close icons, etc.)
-      // by text content, class name, or aria-label
-      var actionWords = new Set(["delete", "remove", "edit", "close", "destroy", "×", "✕", "✖", "✗", "✘", "x"]);
-      var elText = (el.textContent || "").trim().toLowerCase();
-      var elClass = (el.className || "").toLowerCase();
-      var elAriaLabel = (el.getAttribute && el.getAttribute("aria-label") || "").toLowerCase();
-      var isAction = actionWords.has(elText)
-        || [...actionWords].some(function(w) { return elClass.includes(w); })
-        || [...actionWords].some(function(w) { return elAriaLabel.includes(w); })
-        || (el.tagName === "BUTTON" && !elText && el.closest && el.closest("li, tr, [role=listitem]"));
-      try {
-        var ctx = getItemContext(el);
-        if (ctx && isAction) {
-          send('click ' + locator + ' "' + ctx.replace(/"/g, '\\\\"') + '"');
-        } else {
-          send('click ' + locator);
-        }
-      } catch(ce) {
-        send('click ' + locator);
-      }
-    } catch(err) {
-      console.debug("__pw:# click recording error: " + err.message);
-    }
-  }
-
-  function handleInput(e) {
-    const el = e.target;
-    if (el.tagName !== "INPUT" && el.tagName !== "TEXTAREA") return;
-    if (el.type === "checkbox" || el.type === "radio") return;
-    fillTarget = el;
-    fillValue = el.value;
-    if (fillTimer) clearTimeout(fillTimer);
-    fillTimer = setTimeout(flushFill, 1500);
-  }
-
-  function handleChange(e) {
-    const el = e.target;
-    if (el.tagName === "SELECT") {
-      const opt = el.options[el.selectedIndex];
-      const optText = opt ? opt.text.trim() : el.value;
-      send('select ' + getLocator(el) + ' "' + optText.replace(/"/g, '\\\\"') + '"');
-    }
-  }
-
-  function handleKeydown(e) {
-    const specialKeys = ["Enter", "Tab", "Escape"];
-    if (specialKeys.includes(e.key)) {
-      if (fillTimer) { clearTimeout(fillTimer); flushFill(); }
-      send('press ' + e.key);
-    }
-  }
-
-  document.addEventListener("click", handleClick, true);
-  document.addEventListener("input", handleInput, true);
-  document.addEventListener("change", handleChange, true);
-  document.addEventListener("keydown", handleKeydown, true);
-
-  window.__pwRecorderCleanup = () => {
-    if (fillTimer) { clearTimeout(fillTimer); flushFill(); }
-    document.removeEventListener("click", handleClick, true);
-    document.removeEventListener("input", handleInput, true);
-    document.removeEventListener("change", handleChange, true);
-    document.removeEventListener("keydown", handleKeydown, true);
-    window.__pwRecorderActive = false;
-    delete window.__pwRecorderCleanup;
-  };
-})();`;
+async function getRecorderCode() {
+  if (_recorderCodeCache) return _recorderCodeCache;
+  const url = chrome.runtime.getURL("content/recorder.js");
+  const resp = await fetch(url);
+  _recorderCodeCache = await resp.text();
+  return _recorderCodeCache;
 }
 
 async function handleCommand(raw, tabId) {
@@ -615,11 +448,7 @@ async function cmdFill(tabId, args) {
     await cdp(tabId, "Input.insertText", { text: value });
     // Dispatch input + change events so frameworks pick it up
     await cdp(tabId, "Runtime.evaluate", {
-      expression: `(() => {
-        const el = document.activeElement;
-        el.dispatchEvent(new Event('input', { bubbles: true }));
-        el.dispatchEvent(new Event('change', { bubbles: true }));
-      })()`,
+      expression: callInPage(dispatchFillEvents),
     });
     return { success: true, type: "success", data: `Filled "${target}" with "${value}"` };
   } catch (e) {
@@ -634,28 +463,7 @@ async function cmdSelect(tabId, args) {
   const target = args[0];
   const option = args[1];
   try {
-    const escaped = JSON.stringify(target);
-    const escapedOption = JSON.stringify(option);
-    const js = `
-      (() => {
-        const text = ${escaped};
-        const optText = ${escapedOption};
-        const lower = text.toLowerCase();
-        function matches(s) { return s && s.trim().toLowerCase() === lower; }
-        let sel = document.querySelector('select[aria-label="' + CSS.escape(text) + '"]');
-        if (!sel) {
-          const labels = [...document.querySelectorAll('label')];
-          const label = labels.find(l => matches(l.textContent));
-          if (label) sel = label.control || document.getElementById(label.htmlFor);
-        }
-        if (!sel || sel.tagName !== 'SELECT') return { error: 'No select found: ' + text };
-        const opt = [...sel.options].find(o => o.text.trim().toLowerCase() === optText.toLowerCase() || o.value.toLowerCase() === optText.toLowerCase());
-        if (!opt) return { error: 'Option not found: ' + optText };
-        sel.value = opt.value;
-        sel.dispatchEvent(new Event('change', { bubbles: true }));
-        return { success: true };
-      })()
-    `;
+    const js = callInPage(selectElement, target, option);
     const result = await cdp(tabId, "Runtime.evaluate", { expression: js, returnByValue: true });
     const val = result.result?.value;
     if (!val || val.error) {
@@ -674,37 +482,7 @@ async function cmdCheck(tabId, args, checked) {
   const target = args[0];
   const action = checked ? "check" : "uncheck";
   try {
-    const escaped = JSON.stringify(target);
-    const js = `
-      (() => {
-        const text = ${escaped};
-        const lower = text.toLowerCase();
-        function matches(s) { return s && s.trim().toLowerCase() === lower; }
-        let el;
-        // 1. Find by label association (for/id)
-        const labels = [...document.querySelectorAll('label')];
-        const label = labels.find(l => matches(l.textContent));
-        if (label) el = label.control || document.getElementById(label.htmlFor);
-        // 2. Find by aria-label on the checkbox itself
-        if (!el) el = document.querySelector('input[type="checkbox"][aria-label="' + CSS.escape(text) + '"]');
-        // 3. Find checkbox in the same container as matching text (sibling pattern)
-        if (!el && label) {
-          const container = label.closest('li, tr, div, [role="listitem"]');
-          if (container) el = container.querySelector('input[type="checkbox"]');
-        }
-        // 4. Find a list item/container whose text matches, then get its checkbox
-        if (!el) {
-          const items = [...document.querySelectorAll('li, tr, [role="listitem"], [role="row"]')];
-          const item = items.find(i => i.textContent.trim().toLowerCase().includes(lower));
-          if (item) el = item.querySelector('input[type="checkbox"]');
-        }
-        if (!el || (el.type !== 'checkbox' && el.type !== 'radio')) return { error: 'No checkbox found: ' + text };
-        if (el.checked !== ${checked}) {
-          el.click();
-        }
-        return { success: true, checked: el.checked };
-      })()
-    `;
+    const js = callInPage(checkElement, target, checked);
     const result = await cdp(tabId, "Runtime.evaluate", { expression: js, returnByValue: true });
     const val = result.result?.value;
     if (!val || val.error) {
@@ -722,25 +500,7 @@ async function cmdHover(tabId, args) {
   }
   const target = args[0];
   try {
-    // Reuse click locator to find element coords, but don't click — just hover
-    const escaped = JSON.stringify(target);
-    const js = `
-      (() => {
-        const text = ${escaped};
-        const lower = text.toLowerCase();
-        function matches(s) { return s && s.trim().toLowerCase() === lower; }
-        const interactive = [...document.querySelectorAll('button, a, [role="button"], input, textarea, select, [role="menuitem"]')];
-        let el = interactive.find(e => matches(e.textContent) || matches(e.value) || matches(e.getAttribute('aria-label')));
-        if (!el) {
-          const all = [...document.querySelectorAll('*')];
-          el = all.find(e => matches(e.textContent) && e.children.length === 0);
-        }
-        if (!el) return { error: 'No element found: ' + text };
-        el.scrollIntoView({ block: 'center' });
-        const rect = el.getBoundingClientRect();
-        return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
-      })()
-    `;
+    const js = callInPage(hoverElement, target);
     const result = await cdp(tabId, "Runtime.evaluate", { expression: js, returnByValue: true });
     const pos = result.result?.value;
     if (!pos || pos.error) {
@@ -759,25 +519,7 @@ async function cmdDblclick(tabId, args) {
   }
   const target = args[0];
   try {
-    const escaped = JSON.stringify(target);
-    const js = `
-      (() => {
-        const text = ${escaped};
-        const lower = text.toLowerCase();
-        function matches(s) { return s && s.trim().toLowerCase() === lower; }
-        const interactive = [...document.querySelectorAll('button, a, [role="button"], input, textarea')];
-        let el = interactive.find(e => matches(e.textContent) || matches(e.value));
-        if (!el) {
-          const all = [...document.querySelectorAll('*')];
-          el = all.find(e => matches(e.textContent) && e.children.length === 0);
-        }
-        if (!el) return { error: 'No element found: ' + text };
-        el.scrollIntoView({ block: 'center' });
-        const event = new MouseEvent('dblclick', { bubbles: true, cancelable: true });
-        el.dispatchEvent(event);
-        return { success: true };
-      })()
-    `;
+    const js = callInPage(dblclickElement, target);
     const result = await cdp(tabId, "Runtime.evaluate", { expression: js, returnByValue: true });
     const val = result.result?.value;
     if (!val || val.error) {
@@ -880,8 +622,7 @@ async function cmdVerifyText(tabId, args, shouldExist) {
   }
   const text = args[0];
   try {
-    const escaped = JSON.stringify(text);
-    const js = `document.body.innerText.includes(${escaped})`;
+    const js = callInPage(verifyTextOnPage, text);
     const result = await cdp(tabId, "Runtime.evaluate", {
       expression: js,
       returnByValue: true,
@@ -907,25 +648,7 @@ async function cmdVerifyElement(tabId, args, shouldExist) {
   }
   const target = args[0];
   try {
-    const escaped = JSON.stringify(target);
-    const js = `
-      (() => {
-        const text = ${escaped};
-        const lower = text.toLowerCase();
-        function matches(s) { return s && s.trim().toLowerCase() === lower; }
-        const interactive = [...document.querySelectorAll('button, a, [role="button"], input, textarea, select, [role="menuitem"], [role="link"], [role="tab"]')];
-        let el = interactive.find(e => matches(e.textContent) || matches(e.value) || matches(e.getAttribute('aria-label')));
-        if (!el) {
-          const labels = [...document.querySelectorAll('label')];
-          el = labels.find(l => matches(l.textContent));
-        }
-        if (!el) {
-          const all = [...document.querySelectorAll('*')];
-          el = all.find(e => matches(e.textContent) && e.children.length === 0);
-        }
-        return !!el;
-      })()
-    `;
+    const js = callInPage(verifyElementExists, target);
     const result = await cdp(tabId, "Runtime.evaluate", { expression: js, returnByValue: true });
     const found = result.result?.value === true;
     if (shouldExist && found) {

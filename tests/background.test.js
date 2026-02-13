@@ -1,9 +1,28 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { chrome } from "vitest-chrome/lib/index.esm.js";
+import { readFileSync } from "fs";
+import { resolve } from "path";
+
+// Read the actual recorder.js file content for fetch mock
+const recorderCode = readFileSync(
+  resolve(import.meta.dirname, "..", "content", "recorder.js"),
+  "utf-8"
+);
+
+// Mock fetch so getRecorderCode() can load content/recorder.js
+globalThis.fetch = vi.fn(() =>
+  Promise.resolve({ text: () => Promise.resolve(recorderCode) })
+);
+chrome.runtime.getURL = vi.fn((path) => `chrome-extension://test/${path}`);
 
 // Mock chrome.debugger.sendCommand to resolve with expected results
 beforeEach(() => {
   vi.restoreAllMocks();
+  // Re-apply fetch mock after restoreAllMocks
+  globalThis.fetch = vi.fn(() =>
+    Promise.resolve({ text: () => Promise.resolve(recorderCode) })
+  );
+  chrome.runtime.getURL = vi.fn((path) => `chrome-extension://test/${path}`);
   chrome.debugger.sendCommand.mockReset();
   chrome.debugger.attach.mockReset();
   chrome.debugger.detach.mockReset();
@@ -67,61 +86,68 @@ describe("cmdHelp", () => {
 });
 
 describe("getRecorderCode", () => {
-  it("returns a string of JavaScript", () => {
-    const code = getRecorderCode();
+  it("returns a string of JavaScript", async () => {
+    const code = await getRecorderCode();
     expect(typeof code).toBe("string");
     expect(code.length).toBeGreaterThan(100);
   });
 
-  it("contains the IIFE wrapper", () => {
-    const code = getRecorderCode();
+  it("caches the result after first fetch", async () => {
+    const code1 = await getRecorderCode();
+    const code2 = await getRecorderCode();
+    expect(code1).toBe(code2);
+    expect(typeof code1).toBe("string");
+  });
+
+  it("contains the IIFE wrapper", async () => {
+    const code = await getRecorderCode();
     expect(code).toContain("(() => {");
     expect(code).toContain("})();");
   });
 
-  it("sets __pwRecorderActive flag", () => {
-    const code = getRecorderCode();
+  it("sets __pwRecorderActive flag", async () => {
+    const code = await getRecorderCode();
     expect(code).toContain("__pwRecorderActive");
   });
 
-  it("includes event listeners for click, input, change, keydown", () => {
-    const code = getRecorderCode();
+  it("includes event listeners for click, input, change, keydown", async () => {
+    const code = await getRecorderCode();
     expect(code).toContain('"click"');
     expect(code).toContain('"input"');
     expect(code).toContain('"change"');
     expect(code).toContain('"keydown"');
   });
 
-  it("includes cleanup function", () => {
-    const code = getRecorderCode();
+  it("includes cleanup function", async () => {
+    const code = await getRecorderCode();
     expect(code).toContain("__pwRecorderCleanup");
   });
 
-  it("sends commands via console.debug with __pw: prefix", () => {
-    const code = getRecorderCode();
+  it("sends commands via console.debug with __pw: prefix", async () => {
+    const code = await getRecorderCode();
     expect(code).toContain('console.debug("__pw:"');
   });
 
-  it("includes checkbox detection", () => {
-    const code = getRecorderCode();
+  it("includes checkbox detection", async () => {
+    const code = await getRecorderCode();
     expect(code).toContain("findCheckbox");
   });
 
-  it("includes action button detection", () => {
-    const code = getRecorderCode();
+  it("includes action button detection", async () => {
+    const code = await getRecorderCode();
     expect(code).toContain("actionWords");
     expect(code).toContain("delete");
     expect(code).toContain("destroy");
   });
 
-  it("includes fill debounce with 1500ms timer", () => {
-    const code = getRecorderCode();
+  it("includes fill debounce with 1500ms timer", async () => {
+    const code = await getRecorderCode();
     expect(code).toContain("1500");
     expect(code).toContain("flushFill");
   });
 
-  it("includes item context for scoped clicks", () => {
-    const code = getRecorderCode();
+  it("includes item context for scoped clicks", async () => {
+    const code = await getRecorderCode();
     expect(code).toContain("getItemContext");
   });
 });

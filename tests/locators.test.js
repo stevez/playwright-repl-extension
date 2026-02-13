@@ -4,13 +4,14 @@ import { buildClickElementJS, buildFocusElementJS } from "../lib/locators.js";
 describe("buildClickElementJS", () => {
   it("generates code for snapshot ref e1", () => {
     const js = buildClickElementJS("e1");
-    expect(js).toContain("elements[0]");
+    expect(js).toContain("elements[index]");
+    expect(js).toContain("(0,");
     expect(js).toContain(".click()");
   });
 
   it("generates code for snapshot ref e8", () => {
     const js = buildClickElementJS("e8");
-    expect(js).toContain("elements[7]");
+    expect(js).toContain("(7,");
   });
 
   it("generates code for text locator", () => {
@@ -20,9 +21,9 @@ describe("buildClickElementJS", () => {
     expect(js).toContain("matches");
   });
 
-  it("generates code without scope when scope is null", () => {
+  it("passes null scope when scope is null", () => {
     const js = buildClickElementJS("Submit", null);
-    expect(js).toContain("scopeText = null");
+    expect(js).toContain('"Submit", null)');
   });
 
   it("generates scoped code when scope is provided", () => {
@@ -33,11 +34,10 @@ describe("buildClickElementJS", () => {
     expect(js).toContain("containers");
   });
 
-  it("generates valid IIFE that returns an object", () => {
+  it("generates valid function call expression", () => {
     const js = buildClickElementJS("Submit");
-    // Should be a self-executing function
-    expect(js.trim()).toMatch(/^\(\(\) => \{/);
-    expect(js.trim()).toMatch(/\}\)\(\)$/);
+    expect(js.trim()).toMatch(/^\(function clickElementByText/);
+    expect(js.trim()).toMatch(/\)$/);
   });
 
   it("includes error handling for missing elements", () => {
@@ -63,12 +63,19 @@ describe("buildClickElementJS", () => {
   it("uses tree walker for snapshot refs", () => {
     const js = buildClickElementJS("e3");
     expect(js).toContain("createTreeWalker");
-    expect(js).toContain("elements[2]");
+    expect(js).toContain("(2,");
   });
 
   it("includes scope error message when scope is provided", () => {
     const js = buildClickElementJS("delete", "costco");
     expect(js).toContain("in");
+  });
+
+  it("generates valid ref function call expression", () => {
+    const js = buildClickElementJS("e5");
+    expect(js.trim()).toMatch(/^\(function clickElementByRef/);
+    expect(js).toContain("4");
+    expect(js).toContain('"e5"');
   });
 });
 
@@ -79,10 +86,10 @@ describe("buildFocusElementJS", () => {
     expect(js).toContain(".focus()");
   });
 
-  it("generates valid IIFE", () => {
+  it("generates valid function call expression", () => {
     const js = buildFocusElementJS("Search");
-    expect(js.trim()).toMatch(/^\(\(\) => \{/);
-    expect(js.trim()).toMatch(/\}\)\(\)$/);
+    expect(js.trim()).toMatch(/^\(function focusElement/);
+    expect(js.trim()).toMatch(/\)$/);
   });
 
   it("searches by placeholder", () => {

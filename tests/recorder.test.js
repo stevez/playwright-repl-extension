@@ -1,17 +1,15 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 describe("content/recorder.js", () => {
+  let debugSpy;
+
   beforeEach(() => {
     // Reset the recorder state
     delete window.__pwRecorderActive;
     delete window.__pwRecorderCleanup;
 
-    // Mock chrome.runtime.sendMessage for the content script
-    globalThis.chrome = {
-      runtime: {
-        sendMessage: vi.fn(),
-      },
-    };
+    // Spy on console.debug (the recorder uses it to send commands)
+    debugSpy = vi.spyOn(console, "debug").mockImplementation(() => {});
   });
 
   afterEach(() => {
@@ -19,6 +17,7 @@ describe("content/recorder.js", () => {
     if (window.__pwRecorderCleanup) {
       window.__pwRecorderCleanup();
     }
+    debugSpy.mockRestore();
   });
 
   it("sets __pwRecorderActive on load", async () => {
@@ -73,10 +72,7 @@ describe("content/recorder.js", () => {
     const btn = document.getElementById("test-btn");
     btn.click();
 
-    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
-      type: "pw-recorded",
-      command: expect.stringContaining("click"),
-    });
+    expect(debugSpy).toHaveBeenCalledWith("__pw:click \"Submit\"");
   });
 
   it("records checkbox check/uncheck", async () => {
@@ -92,10 +88,9 @@ describe("content/recorder.js", () => {
     cb.checked = true;
     cb.dispatchEvent(new Event("click", { bubbles: true }));
 
-    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
-      type: "pw-recorded",
-      command: expect.stringContaining("check"),
-    });
+    expect(debugSpy).toHaveBeenCalledWith(
+      expect.stringContaining("__pw:check")
+    );
   });
 
   it("records checkbox uncheck when unchecked", async () => {
@@ -111,10 +106,9 @@ describe("content/recorder.js", () => {
     cb.checked = false;
     cb.dispatchEvent(new Event("click", { bubbles: true }));
 
-    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
-      type: "pw-recorded",
-      command: expect.stringContaining("uncheck"),
-    });
+    expect(debugSpy).toHaveBeenCalledWith(
+      expect.stringContaining("__pw:uncheck")
+    );
   });
 
   it("records radio button clicks", async () => {
@@ -129,10 +123,9 @@ describe("content/recorder.js", () => {
     const radio = document.getElementById("test-radio");
     radio.dispatchEvent(new Event("click", { bubbles: true }));
 
-    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
-      type: "pw-recorded",
-      command: expect.stringContaining("click"),
-    });
+    expect(debugSpy).toHaveBeenCalledWith(
+      expect.stringContaining("__pw:click")
+    );
   });
 
   it("records select changes", async () => {
@@ -153,10 +146,9 @@ describe("content/recorder.js", () => {
     sel.value = "b";
     sel.dispatchEvent(new Event("change", { bubbles: true }));
 
-    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
-      type: "pw-recorded",
-      command: expect.stringContaining("select"),
-    });
+    expect(debugSpy).toHaveBeenCalledWith(
+      expect.stringContaining("__pw:select")
+    );
   });
 
   it("records special key presses", async () => {
@@ -168,10 +160,7 @@ describe("content/recorder.js", () => {
 
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
 
-    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
-      type: "pw-recorded",
-      command: "press Enter",
-    });
+    expect(debugSpy).toHaveBeenCalledWith("__pw:press Enter");
   });
 
   it("records Tab key press", async () => {
@@ -183,10 +172,7 @@ describe("content/recorder.js", () => {
 
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true }));
 
-    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
-      type: "pw-recorded",
-      command: "press Tab",
-    });
+    expect(debugSpy).toHaveBeenCalledWith("__pw:press Tab");
   });
 
   it("records Escape key press", async () => {
@@ -198,10 +184,7 @@ describe("content/recorder.js", () => {
 
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
 
-    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
-      type: "pw-recorded",
-      command: "press Escape",
-    });
+    expect(debugSpy).toHaveBeenCalledWith("__pw:press Escape");
   });
 
   it("does not record non-special key presses", async () => {
@@ -213,7 +196,8 @@ describe("content/recorder.js", () => {
 
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "a", bubbles: true }));
 
-    expect(chrome.runtime.sendMessage).not.toHaveBeenCalled();
+    const pwCalls = debugSpy.mock.calls.filter(c => String(c[0]).startsWith("__pw:"));
+    expect(pwCalls).toHaveLength(0);
   });
 
   it("skips clicks on text input elements", async () => {
@@ -228,7 +212,8 @@ describe("content/recorder.js", () => {
     const input = document.getElementById("test-input");
     input.click();
 
-    expect(chrome.runtime.sendMessage).not.toHaveBeenCalled();
+    const pwCalls = debugSpy.mock.calls.filter(c => String(c[0]).startsWith("__pw:"));
+    expect(pwCalls).toHaveLength(0);
   });
 
   it("skips clicks on textarea elements", async () => {
@@ -242,7 +227,8 @@ describe("content/recorder.js", () => {
 
     document.getElementById("test-ta").click();
 
-    expect(chrome.runtime.sendMessage).not.toHaveBeenCalled();
+    const pwCalls = debugSpy.mock.calls.filter(c => String(c[0]).startsWith("__pw:"));
+    expect(pwCalls).toHaveLength(0);
   });
 
   it("records input events as debounced fill commands", async () => {
@@ -259,20 +245,19 @@ describe("content/recorder.js", () => {
     input.value = "alice";
     input.dispatchEvent(new Event("input", { bubbles: true }));
 
-    // Should not send immediately (debounced)
-    expect(chrome.runtime.sendMessage).not.toHaveBeenCalled();
+    // Should not send immediately (debounced at 1500ms)
+    const pwCallsBefore = debugSpy.mock.calls.filter(c => String(c[0]).startsWith("__pw:"));
+    expect(pwCallsBefore).toHaveLength(0);
 
     // After debounce timer fires
-    vi.advanceTimersByTime(1000);
+    vi.advanceTimersByTime(1500);
 
-    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
-      type: "pw-recorded",
-      command: expect.stringContaining("fill"),
-    });
-    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
-      type: "pw-recorded",
-      command: expect.stringContaining("alice"),
-    });
+    expect(debugSpy).toHaveBeenCalledWith(
+      expect.stringContaining("__pw:fill")
+    );
+    expect(debugSpy).toHaveBeenCalledWith(
+      expect.stringContaining("alice")
+    );
 
     vi.useRealTimers();
   });
@@ -298,16 +283,17 @@ describe("content/recorder.js", () => {
     input.dispatchEvent(new Event("input", { bubbles: true }));
     vi.advanceTimersByTime(500); // still waiting for debounce from last input
 
-    expect(chrome.runtime.sendMessage).not.toHaveBeenCalled();
+    const pwCallsBefore = debugSpy.mock.calls.filter(c => String(c[0]).startsWith("__pw:"));
+    expect(pwCallsBefore).toHaveLength(0);
 
-    vi.advanceTimersByTime(500); // Now total 1000ms from last input
+    vi.advanceTimersByTime(1000); // Now total 1500ms from last input
 
-    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
-      type: "pw-recorded",
-      command: expect.stringContaining("alice"),
-    });
+    expect(debugSpy).toHaveBeenCalledWith(
+      expect.stringContaining("alice")
+    );
     // Should only be called once (debounced)
-    expect(chrome.runtime.sendMessage).toHaveBeenCalledTimes(1);
+    const pwCalls = debugSpy.mock.calls.filter(c => String(c[0]).startsWith("__pw:"));
+    expect(pwCalls).toHaveLength(1);
 
     vi.useRealTimers();
   });
@@ -334,14 +320,12 @@ describe("content/recorder.js", () => {
     btn.click();
 
     // Fill should have been flushed, then click recorded
-    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
-      type: "pw-recorded",
-      command: expect.stringContaining("fill"),
-    });
-    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
-      type: "pw-recorded",
-      command: expect.stringContaining("click"),
-    });
+    expect(debugSpy).toHaveBeenCalledWith(
+      expect.stringContaining("__pw:fill")
+    );
+    expect(debugSpy).toHaveBeenCalledWith(
+      expect.stringContaining("__pw:click")
+    );
 
     vi.useRealTimers();
   });
@@ -364,14 +348,10 @@ describe("content/recorder.js", () => {
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
 
     // Fill should have been flushed, then Enter recorded
-    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
-      type: "pw-recorded",
-      command: expect.stringContaining("fill"),
-    });
-    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
-      type: "pw-recorded",
-      command: "press Enter",
-    });
+    expect(debugSpy).toHaveBeenCalledWith(
+      expect.stringContaining("__pw:fill")
+    );
+    expect(debugSpy).toHaveBeenCalledWith("__pw:press Enter");
 
     vi.useRealTimers();
   });
@@ -393,10 +373,9 @@ describe("content/recorder.js", () => {
     // Cleanup should flush pending fill
     window.__pwRecorderCleanup();
 
-    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
-      type: "pw-recorded",
-      command: expect.stringContaining("fill"),
-    });
+    expect(debugSpy).toHaveBeenCalledWith(
+      expect.stringContaining("__pw:fill")
+    );
 
     vi.useRealTimers();
   });
@@ -413,7 +392,8 @@ describe("content/recorder.js", () => {
     const cb = document.getElementById("test-cb");
     cb.dispatchEvent(new Event("input", { bubbles: true }));
 
-    expect(chrome.runtime.sendMessage).not.toHaveBeenCalled();
+    const pwCalls = debugSpy.mock.calls.filter(c => String(c[0]).startsWith("__pw:"));
+    expect(pwCalls).toHaveLength(0);
   });
 
   it("uses aria-label for locator", async () => {
@@ -427,10 +407,9 @@ describe("content/recorder.js", () => {
 
     document.querySelector("button").click();
 
-    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
-      type: "pw-recorded",
-      command: 'click "Close dialog"',
-    });
+    expect(debugSpy).toHaveBeenCalledWith(
+      expect.stringContaining('__pw:click "Close dialog"')
+    );
   });
 
   it("uses label[for] for input locator", async () => {
@@ -449,12 +428,11 @@ describe("content/recorder.js", () => {
     const input = document.getElementById("email-input");
     input.value = "test";
     input.dispatchEvent(new Event("input", { bubbles: true }));
-    vi.advanceTimersByTime(1000);
+    vi.advanceTimersByTime(1500);
 
-    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
-      type: "pw-recorded",
-      command: expect.stringContaining("Email Address"),
-    });
+    expect(debugSpy).toHaveBeenCalledWith(
+      expect.stringContaining("Email Address")
+    );
 
     vi.useRealTimers();
   });
@@ -472,12 +450,11 @@ describe("content/recorder.js", () => {
     const input = document.getElementById("test");
     input.value = "query";
     input.dispatchEvent(new Event("input", { bubbles: true }));
-    vi.advanceTimersByTime(1000);
+    vi.advanceTimersByTime(1500);
 
-    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
-      type: "pw-recorded",
-      command: expect.stringContaining("Search..."),
-    });
+    expect(debugSpy).toHaveBeenCalledWith(
+      expect.stringContaining("Search...")
+    );
 
     vi.useRealTimers();
   });
@@ -493,10 +470,7 @@ describe("content/recorder.js", () => {
 
     document.getElementById("test-link").click();
 
-    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
-      type: "pw-recorded",
-      command: 'click "About Us"',
-    });
+    expect(debugSpy).toHaveBeenCalledWith('__pw:click "About Us"');
   });
 
   it("ignores change events on non-select elements", async () => {
@@ -510,6 +484,7 @@ describe("content/recorder.js", () => {
 
     document.getElementById("test").dispatchEvent(new Event("change", { bubbles: true }));
 
-    expect(chrome.runtime.sendMessage).not.toHaveBeenCalled();
+    const pwCalls = debugSpy.mock.calls.filter(c => String(c[0]).startsWith("__pw:"));
+    expect(pwCalls).toHaveLength(0);
   });
 });
