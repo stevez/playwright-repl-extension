@@ -1,0 +1,54 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+      - run: npm test
+
+  release:
+    runs-on: ubuntu-latest
+    needs: test
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get version from tag
+        id: version
+        run: echo "version=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+
+      - name: Create extension zip
+        run: |
+          mkdir -p dist
+          zip -r dist/playwright-repl-${{ steps.version.outputs.version }}.zip \
+            manifest.json \
+            background.js \
+            devtools.html \
+            devtools.js \
+            panel/ \
+            content/ \
+            lib/ \
+            icons/ \
+            LICENSE
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/playwright-repl-${{ steps.version.outputs.version }}.zip
+          generate_release_notes: true
