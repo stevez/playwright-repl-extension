@@ -57,6 +57,11 @@ describe("cmdHelp", () => {
     expect(result.data).toContain("screenshot");
     expect(result.data).toContain("eval");
     expect(result.data).toContain("export");
+    expect(result.data).toContain("verify-text");
+    expect(result.data).toContain("verify-no-text");
+    expect(result.data).toContain("verify-element");
+    expect(result.data).toContain("verify-url");
+    expect(result.data).toContain("verify-title");
     expect(result.data).toContain("help");
   });
 });
@@ -634,6 +639,206 @@ describe("handleCommand", () => {
     chrome.debugger.sendCommand.mockResolvedValue(undefined);
     const pressResult = await handleCommand("p enter", 1);
     expect(pressResult.success).toBe(true);
+  });
+
+  // --- verify-text ---
+  it("verify-text passes when text is found", async () => {
+    chrome.debugger.attach.mockResolvedValue(undefined);
+    chrome.debugger.sendCommand.mockResolvedValue({
+      result: { value: true },
+    });
+    const result = await handleCommand('verify-text "Hello"', 1);
+    expect(result.success).toBe(true);
+    expect(result.data).toContain("PASS");
+    expect(result.data).toContain("Hello");
+  });
+
+  it("verify-text fails when text is not found", async () => {
+    chrome.debugger.attach.mockResolvedValue(undefined);
+    chrome.debugger.sendCommand.mockResolvedValue({
+      result: { value: false },
+    });
+    const result = await handleCommand('verify-text "Missing"', 1);
+    expect(result.success).toBe(false);
+    expect(result.data).toContain("FAIL");
+    expect(result.data).toContain("not found");
+  });
+
+  it("verify-text returns usage error without args", async () => {
+    chrome.debugger.attach.mockResolvedValue(undefined);
+    chrome.debugger.sendCommand.mockResolvedValue(undefined);
+    const result = await handleCommand("verify-text", 1);
+    expect(result.type).toBe("error");
+    expect(result.data).toContain("Usage");
+  });
+
+  // --- verify-no-text ---
+  it("verify-no-text passes when text is absent", async () => {
+    chrome.debugger.attach.mockResolvedValue(undefined);
+    chrome.debugger.sendCommand.mockResolvedValue({
+      result: { value: false },
+    });
+    const result = await handleCommand('verify-no-text "Gone"', 1);
+    expect(result.success).toBe(true);
+    expect(result.data).toContain("PASS");
+    expect(result.data).toContain("not present");
+  });
+
+  it("verify-no-text fails when text is present", async () => {
+    chrome.debugger.attach.mockResolvedValue(undefined);
+    chrome.debugger.sendCommand.mockResolvedValue({
+      result: { value: true },
+    });
+    const result = await handleCommand('verify-no-text "Oops"', 1);
+    expect(result.success).toBe(false);
+    expect(result.data).toContain("FAIL");
+    expect(result.data).toContain("was found");
+  });
+
+  it("verify-no-text returns usage error without args", async () => {
+    chrome.debugger.attach.mockResolvedValue(undefined);
+    chrome.debugger.sendCommand.mockResolvedValue(undefined);
+    const result = await handleCommand("verify-no-text", 1);
+    expect(result.type).toBe("error");
+    expect(result.data).toContain("Usage");
+  });
+
+  // --- verify-element ---
+  it("verify-element passes when element found", async () => {
+    chrome.debugger.attach.mockResolvedValue(undefined);
+    chrome.debugger.sendCommand.mockResolvedValue({
+      result: { value: true },
+    });
+    const result = await handleCommand('verify-element "Submit"', 1);
+    expect(result.success).toBe(true);
+    expect(result.data).toContain("PASS");
+    expect(result.data).toContain("found");
+  });
+
+  it("verify-element fails when element not found", async () => {
+    chrome.debugger.attach.mockResolvedValue(undefined);
+    chrome.debugger.sendCommand.mockResolvedValue({
+      result: { value: false },
+    });
+    const result = await handleCommand('verify-element "Missing"', 1);
+    expect(result.success).toBe(false);
+    expect(result.data).toContain("FAIL");
+    expect(result.data).toContain("not found");
+  });
+
+  it("verify-element returns usage error without args", async () => {
+    chrome.debugger.attach.mockResolvedValue(undefined);
+    chrome.debugger.sendCommand.mockResolvedValue(undefined);
+    const result = await handleCommand("verify-element", 1);
+    expect(result.type).toBe("error");
+    expect(result.data).toContain("Usage");
+  });
+
+  // --- verify-no-element ---
+  it("verify-no-element passes when element absent", async () => {
+    chrome.debugger.attach.mockResolvedValue(undefined);
+    chrome.debugger.sendCommand.mockResolvedValue({
+      result: { value: false },
+    });
+    const result = await handleCommand('verify-no-element "Deleted"', 1);
+    expect(result.success).toBe(true);
+    expect(result.data).toContain("PASS");
+    expect(result.data).toContain("not present");
+  });
+
+  it("verify-no-element fails when element exists", async () => {
+    chrome.debugger.attach.mockResolvedValue(undefined);
+    chrome.debugger.sendCommand.mockResolvedValue({
+      result: { value: true },
+    });
+    const result = await handleCommand('verify-no-element "Still here"', 1);
+    expect(result.success).toBe(false);
+    expect(result.data).toContain("FAIL");
+    expect(result.data).toContain("was found");
+  });
+
+  it("verify-no-element returns usage error without args", async () => {
+    chrome.debugger.attach.mockResolvedValue(undefined);
+    chrome.debugger.sendCommand.mockResolvedValue(undefined);
+    const result = await handleCommand("verify-no-element", 1);
+    expect(result.type).toBe("error");
+    expect(result.data).toContain("Usage");
+  });
+
+  // --- verify-url ---
+  it("verify-url passes when URL contains substring", async () => {
+    chrome.debugger.attach.mockResolvedValue(undefined);
+    chrome.debugger.sendCommand.mockResolvedValue({
+      result: { value: "https://example.com/dashboard" },
+    });
+    const result = await handleCommand('verify-url "dashboard"', 1);
+    expect(result.success).toBe(true);
+    expect(result.data).toContain("PASS");
+    expect(result.data).toContain("dashboard");
+  });
+
+  it("verify-url fails when URL does not contain substring", async () => {
+    chrome.debugger.attach.mockResolvedValue(undefined);
+    chrome.debugger.sendCommand.mockResolvedValue({
+      result: { value: "https://example.com/home" },
+    });
+    const result = await handleCommand('verify-url "dashboard"', 1);
+    expect(result.success).toBe(false);
+    expect(result.data).toContain("FAIL");
+    expect(result.data).toContain("does not contain");
+  });
+
+  it("verify-url returns usage error without args", async () => {
+    chrome.debugger.attach.mockResolvedValue(undefined);
+    chrome.debugger.sendCommand.mockResolvedValue(undefined);
+    const result = await handleCommand("verify-url", 1);
+    expect(result.type).toBe("error");
+    expect(result.data).toContain("Usage");
+  });
+
+  // --- verify-title ---
+  it("verify-title passes when title contains text", async () => {
+    chrome.debugger.attach.mockResolvedValue(undefined);
+    chrome.debugger.sendCommand.mockResolvedValue({
+      result: { value: "My App - Dashboard" },
+    });
+    const result = await handleCommand('verify-title "Dashboard"', 1);
+    expect(result.success).toBe(true);
+    expect(result.data).toContain("PASS");
+    expect(result.data).toContain("Dashboard");
+  });
+
+  it("verify-title fails when title does not contain text", async () => {
+    chrome.debugger.attach.mockResolvedValue(undefined);
+    chrome.debugger.sendCommand.mockResolvedValue({
+      result: { value: "My App - Home" },
+    });
+    const result = await handleCommand('verify-title "Dashboard"', 1);
+    expect(result.success).toBe(false);
+    expect(result.data).toContain("FAIL");
+    expect(result.data).toContain("does not contain");
+  });
+
+  it("verify-title returns usage error without args", async () => {
+    chrome.debugger.attach.mockResolvedValue(undefined);
+    chrome.debugger.sendCommand.mockResolvedValue(undefined);
+    const result = await handleCommand("verify-title", 1);
+    expect(result.type).toBe("error");
+    expect(result.data).toContain("Usage");
+  });
+
+  // --- verify error handling ---
+  it("verify-text handles CDP errors", async () => {
+    chrome.debugger.attach.mockResolvedValue(undefined);
+    let callCount = 0;
+    chrome.debugger.sendCommand.mockImplementation(async () => {
+      callCount++;
+      if (callCount <= 2) return undefined;
+      throw new Error("Context destroyed");
+    });
+    const result = await handleCommand('verify-text "Hello"', 1);
+    expect(result.success).toBe(false);
+    expect(result.data).toContain("Verify failed");
   });
 
   it("returns error when debugger attach fails", async () => {

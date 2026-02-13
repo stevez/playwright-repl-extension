@@ -484,6 +484,12 @@ async function handleCommand(raw, tabId) {
     case "go-forward":
     case "forward":     return cmdGoForward(tabId);
     case "reload":      return cmdReload(tabId);
+    case "verify-text":     return cmdVerifyText(tabId, args, true);
+    case "verify-no-text":  return cmdVerifyText(tabId, args, false);
+    case "verify-element":     return cmdVerifyElement(tabId, args, true);
+    case "verify-no-element":  return cmdVerifyElement(tabId, args, false);
+    case "verify-url":      return cmdVerifyUrl(tabId, args);
+    case "verify-title":    return cmdVerifyTitle(tabId, args);
     default:
       return { success: false, type: "error", data: `Unknown command: ${command}` };
   }
@@ -868,6 +874,116 @@ async function cmdPress(tabId, args) {
   }
 }
 
+async function cmdVerifyText(tabId, args, shouldExist) {
+  if (args.length === 0) {
+    return { success: false, type: "error", data: `Usage: verify-${shouldExist ? '' : 'no-'}text "text"` };
+  }
+  const text = args[0];
+  try {
+    const escaped = JSON.stringify(text);
+    const js = `document.body.innerText.includes(${escaped})`;
+    const result = await cdp(tabId, "Runtime.evaluate", {
+      expression: js,
+      returnByValue: true,
+    });
+    const found = result.result?.value === true;
+    if (shouldExist && found) {
+      return { success: true, type: "success", data: `PASS: Text "${text}" found on page` };
+    } else if (shouldExist && !found) {
+      return { success: false, type: "error", data: `FAIL: Text "${text}" not found on page` };
+    } else if (!shouldExist && !found) {
+      return { success: true, type: "success", data: `PASS: Text "${text}" not present (as expected)` };
+    } else {
+      return { success: false, type: "error", data: `FAIL: Text "${text}" was found on page (expected absent)` };
+    }
+  } catch (e) {
+    return { success: false, type: "error", data: `Verify failed: ${e.message}` };
+  }
+}
+
+async function cmdVerifyElement(tabId, args, shouldExist) {
+  if (args.length === 0) {
+    return { success: false, type: "error", data: `Usage: verify-${shouldExist ? '' : 'no-'}element "target"` };
+  }
+  const target = args[0];
+  try {
+    const escaped = JSON.stringify(target);
+    const js = `
+      (() => {
+        const text = ${escaped};
+        const lower = text.toLowerCase();
+        function matches(s) { return s && s.trim().toLowerCase() === lower; }
+        const interactive = [...document.querySelectorAll('button, a, [role="button"], input, textarea, select, [role="menuitem"], [role="link"], [role="tab"]')];
+        let el = interactive.find(e => matches(e.textContent) || matches(e.value) || matches(e.getAttribute('aria-label')));
+        if (!el) {
+          const labels = [...document.querySelectorAll('label')];
+          el = labels.find(l => matches(l.textContent));
+        }
+        if (!el) {
+          const all = [...document.querySelectorAll('*')];
+          el = all.find(e => matches(e.textContent) && e.children.length === 0);
+        }
+        return !!el;
+      })()
+    `;
+    const result = await cdp(tabId, "Runtime.evaluate", { expression: js, returnByValue: true });
+    const found = result.result?.value === true;
+    if (shouldExist && found) {
+      return { success: true, type: "success", data: `PASS: Element "${target}" found` };
+    } else if (shouldExist && !found) {
+      return { success: false, type: "error", data: `FAIL: Element "${target}" not found` };
+    } else if (!shouldExist && !found) {
+      return { success: true, type: "success", data: `PASS: Element "${target}" not present (as expected)` };
+    } else {
+      return { success: false, type: "error", data: `FAIL: Element "${target}" was found (expected absent)` };
+    }
+  } catch (e) {
+    return { success: false, type: "error", data: `Verify failed: ${e.message}` };
+  }
+}
+
+async function cmdVerifyUrl(tabId, args) {
+  if (args.length === 0) {
+    return { success: false, type: "error", data: 'Usage: verify-url "substring"' };
+  }
+  const expected = args[0];
+  try {
+    const result = await cdp(tabId, "Runtime.evaluate", {
+      expression: "window.location.href",
+      returnByValue: true,
+    });
+    const url = result.result?.value || "";
+    if (url.includes(expected)) {
+      return { success: true, type: "success", data: `PASS: URL contains "${expected}" (${url})` };
+    } else {
+      return { success: false, type: "error", data: `FAIL: URL does not contain "${expected}" (${url})` };
+    }
+  } catch (e) {
+    return { success: false, type: "error", data: `Verify failed: ${e.message}` };
+  }
+}
+
+async function cmdVerifyTitle(tabId, args) {
+  if (args.length === 0) {
+    return { success: false, type: "error", data: 'Usage: verify-title "expected"' };
+  }
+  const expected = args[0];
+  try {
+    const result = await cdp(tabId, "Runtime.evaluate", {
+      expression: "document.title",
+      returnByValue: true,
+    });
+    const title = result.result?.value || "";
+    if (title.includes(expected)) {
+      return { success: true, type: "success", data: `PASS: Title contains "${expected}" ("${title}")` };
+    } else {
+      return { success: false, type: "error", data: `FAIL: Title does not contain "${expected}" ("${title}")` };
+    }
+  } catch (e) {
+    return { success: false, type: "error", data: `Verify failed: ${e.message}` };
+  }
+}
+
 function cmdHelp() {
   const lines = [
     "Available commands:",
@@ -883,6 +999,12 @@ function cmdHelp() {
     '  snapshot/s              Show accessibility tree',
     '  screenshot [full]       Capture screenshot',
     '  eval <expr>             Evaluate JS expression',
+    '  verify-text "text"      Assert text is visible on page',
+    '  verify-no-text "text"   Assert text is NOT on page',
+    '  verify-element "target" Assert element exists',
+    '  verify-no-element "t"   Assert element does NOT exist',
+    '  verify-url "substring"  Assert URL contains string',
+    '  verify-title "text"     Assert page title contains string',
     '  go-back/back            Navigate back',
     '  go-forward/forward      Navigate forward',
     '  reload                  Reload page',
