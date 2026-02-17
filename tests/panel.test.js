@@ -44,7 +44,11 @@ describe("panel.js", () => {
         <div id="output"></div>
         <div id="input-bar">
           <span id="prompt">pw&gt;</span>
-          <input type="text" id="command-input" autocomplete="off" spellcheck="false">
+          <div id="input-wrapper">
+            <div id="autocomplete-dropdown" hidden></div>
+            <span id="ghost-text"></span>
+            <input type="text" id="command-input" autocomplete="off" spellcheck="false">
+          </div>
         </div>
       </div>
       <div id="lightbox" hidden><button id="lightbox-close-btn">&times;</button><button id="lightbox-save-btn">Save</button><img id="lightbox-img"></div>
@@ -66,6 +70,7 @@ describe("panel.js", () => {
       onDisconnect: { addListener: vi.fn() },
       name: "pw-panel-42",
     };
+    chrome.runtime.id = "mock-extension-id";
     chrome.runtime.connect.mockReturnValue(mockPort);
     chrome.runtime.sendMessage.mockResolvedValue({ type: "success", data: "OK" });
   });
@@ -75,7 +80,7 @@ describe("panel.js", () => {
   it("renders welcome message on load", async () => {
     await import("../panel/panel.js");
     const output = document.getElementById("output");
-    expect(output.textContent).toContain("Playwright REPL v0.9.2");
+    expect(output.textContent).toContain("Playwright REPL v0.9.3");
     expect(output.textContent).toContain("editor");
   });
 
@@ -881,5 +886,202 @@ describe("panel.js", () => {
         tabId: 42,
       });
     });
+  });
+
+  // --- Autocomplete ---
+
+  it("ghost text shows completion hint while typing", async () => {
+    await import("../panel/panel.js");
+    const input = document.getElementById("command-input");
+    const ghost = document.getElementById("ghost-text");
+
+    input.value = "go";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    expect(ghost.textContent).toBe("to");
+  });
+
+  it("ghost text shows hint for screenshot", async () => {
+    await import("../panel/panel.js");
+    const input = document.getElementById("command-input");
+    const ghost = document.getElementById("ghost-text");
+
+    input.value = "scr";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    expect(ghost.textContent).toBe("eenshot");
+  });
+
+  it("ghost text clears when full command is typed", async () => {
+    await import("../panel/panel.js");
+    const input = document.getElementById("command-input");
+    const ghost = document.getElementById("ghost-text");
+
+    input.value = "goto";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    expect(ghost.textContent).toBe("");
+  });
+
+  it("ghost text clears when space is typed after command", async () => {
+    await import("../panel/panel.js");
+    const input = document.getElementById("command-input");
+    const ghost = document.getElementById("ghost-text");
+
+    input.value = "goto ";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    expect(ghost.textContent).toBe("");
+  });
+
+  it("ghost text clears on empty input", async () => {
+    await import("../panel/panel.js");
+    const input = document.getElementById("command-input");
+    const ghost = document.getElementById("ghost-text");
+
+    input.value = "";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    expect(ghost.textContent).toBe("");
+  });
+
+  it("Tab completes single matching command", async () => {
+    await import("../panel/panel.js");
+    const input = document.getElementById("command-input");
+
+    input.value = "scr";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true }));
+    expect(input.value).toBe("screenshot ");
+  });
+
+  it("dropdown shows for multiple matches", async () => {
+    await import("../panel/panel.js");
+    const input = document.getElementById("command-input");
+    const dd = document.getElementById("autocomplete-dropdown");
+
+    input.value = "go";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+
+    expect(dd.hidden).toBe(false);
+    expect(dd.querySelectorAll(".autocomplete-item").length).toBeGreaterThan(1);
+  });
+
+  it("Tab selects first dropdown item when dropdown is open", async () => {
+    await import("../panel/panel.js");
+    const input = document.getElementById("command-input");
+    const dd = document.getElementById("autocomplete-dropdown");
+
+    input.value = "go";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    expect(dd.hidden).toBe(false);
+
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true }));
+    expect(input.value.startsWith("go")).toBe(true);
+    expect(input.value.endsWith(" ")).toBe(true);
+    expect(dd.hidden).toBe(true);
+  });
+
+  it("ArrowDown navigates dropdown items", async () => {
+    await import("../panel/panel.js");
+    const input = document.getElementById("command-input");
+    const dd = document.getElementById("autocomplete-dropdown");
+
+    input.value = "go";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    expect(dd.hidden).toBe(false);
+
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    const items = dd.querySelectorAll(".autocomplete-item");
+    expect(items[0].classList.contains("active")).toBe(true);
+  });
+
+  it("Enter selects highlighted dropdown item", async () => {
+    await import("../panel/panel.js");
+    const input = document.getElementById("command-input");
+    const dd = document.getElementById("autocomplete-dropdown");
+
+    input.value = "go";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+
+    // Navigate to first item
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    // Select it
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    expect(input.value.startsWith("go")).toBe(true);
+    expect(input.value.endsWith(" ")).toBe(true);
+    expect(dd.hidden).toBe(true);
+  });
+
+  it("Escape closes dropdown", async () => {
+    await import("../panel/panel.js");
+    const input = document.getElementById("command-input");
+    const dd = document.getElementById("autocomplete-dropdown");
+
+    input.value = "go";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    expect(dd.hidden).toBe(false);
+
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    expect(dd.hidden).toBe(true);
+  });
+
+  it("dropdown hides when single match remains", async () => {
+    await import("../panel/panel.js");
+    const input = document.getElementById("command-input");
+    const dd = document.getElementById("autocomplete-dropdown");
+
+    input.value = "scr";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    expect(dd.hidden).toBe(true);
+  });
+
+  it("clicking dropdown item selects it", async () => {
+    await import("../panel/panel.js");
+    const input = document.getElementById("command-input");
+    const dd = document.getElementById("autocomplete-dropdown");
+
+    input.value = "go";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    expect(dd.hidden).toBe(false);
+
+    const firstItem = dd.querySelector(".autocomplete-item");
+    firstItem.dispatchEvent(new Event("mousedown", { bubbles: true }));
+    expect(input.value.endsWith(" ")).toBe(true);
+    expect(dd.hidden).toBe(true);
+  });
+
+  it("Enter clears ghost text", async () => {
+    await import("../panel/panel.js");
+    const input = document.getElementById("command-input");
+    const ghost = document.getElementById("ghost-text");
+
+    input.value = "go";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    expect(ghost.textContent).not.toBe("");
+
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    expect(ghost.textContent).toBe("");
+  });
+
+  it("ArrowUp clears ghost text when no dropdown", async () => {
+    await import("../panel/panel.js");
+    const input = document.getElementById("command-input");
+    const ghost = document.getElementById("ghost-text");
+
+    input.value = "scr";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    expect(ghost.textContent).not.toBe("");
+
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
+    expect(ghost.textContent).toBe("");
+  });
+
+  it("ArrowDown clears ghost text when no dropdown", async () => {
+    await import("../panel/panel.js");
+    const input = document.getElementById("command-input");
+    const ghost = document.getElementById("ghost-text");
+
+    input.value = "scr";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    expect(ghost.textContent).not.toBe("");
+
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    expect(ghost.textContent).toBe("");
   });
 });

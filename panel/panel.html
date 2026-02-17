@@ -47,8 +47,12 @@
     <div id="output"></div>
     <div id="input-bar">
       <span id="prompt">pw&gt;</span>
-      <input type="text" id="command-input" placeholder="Type a .pw command..."
-        autocomplete="off" spellcheck="false">
+      <div id="input-wrapper">
+        <div id="autocomplete-dropdown" hidden></div>
+        <span id="ghost-text"></span>
+        <input type="text" id="command-input" placeholder="Type a .pw command..."
+          autocomplete="off" spellcheck="false">
+      </div>
     </div>
   </div>
 

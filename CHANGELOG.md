@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.9.3
+
+### Added
+
+- Command autocomplete with ghost text hint while typing
+- Autocomplete dropdown (auto-shows while typing, Tab, or Ctrl+Space to trigger)
+- Arrow key navigation, Enter/Tab/click to select from dropdown
+- Tab on empty input shows all available commands
+
+### Fixed
+
+- "Extension context invalidated" error after extension reload (`chrome.runtime?.id` guard)
+- Port reconnect loop stops when extension context is dead
+
 ## v0.9.2
 
 ### Added

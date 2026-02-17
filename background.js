@@ -12,7 +12,7 @@ import {
   dispatchFillEvents,
 } from "./lib/page-scripts.js";
 
-console.log("[PW] background.js loaded v0.9.2");
+console.log("[PW] background.js loaded v0.9.3");
 
 // Track which tabs we've attached the debugger to
 const attachedTabs = new Set();

@@ -23,6 +23,8 @@ const lightbox = document.getElementById("lightbox");
 const lightboxImg = document.getElementById("lightbox-img");
 const lightboxSaveBtn = document.getElementById("lightbox-save-btn");
 const lightboxCloseBtn = document.getElementById("lightbox-close-btn");
+const ghostText = document.getElementById("ghost-text");
+const dropdown = document.getElementById("autocomplete-dropdown");
 
 // The tab we're inspecting
 const inspectedTabId = chrome.devtools.inspectedWindow.tabId;
@@ -54,6 +56,74 @@ let currentFilename = "";
 
 // Commands handled locally (not added to history, not sent to background)
 const LOCAL_COMMANDS = new Set(["history", "clear", "reset"]);
+
+// All commands for autocomplete
+const COMMANDS = [
+  "goto", "open", "click", "dblclick", "fill", "select",
+  "check", "uncheck", "hover", "press", "snapshot",
+  "screenshot", "eval", "go-back", "back", "go-forward", "forward",
+  "reload", "verify-text", "verify-no-text", "verify-element",
+  "verify-no-element", "verify-url", "verify-title",
+  "export", "help", "history", "clear", "reset"
+];
+
+// --- Autocomplete ---
+
+function updateGhostText() {
+  const val = input.value.toLowerCase();
+  if (!val || val.includes(" ")) {
+    ghostText.textContent = "";
+    return;
+  }
+  const match = COMMANDS.find(cmd => cmd.startsWith(val) && cmd !== val);
+  if (match) {
+    ghostText.style.paddingLeft = val.length + "ch";
+    ghostText.textContent = match.slice(val.length);
+  } else {
+    ghostText.textContent = "";
+  }
+}
+
+function clearGhostText() {
+  ghostText.textContent = "";
+}
+
+let dropdownItems = [];
+let dropdownIndex = -1;
+
+function showDropdown(matches) {
+  dropdown.innerHTML = "";
+  dropdownItems = matches;
+  dropdownIndex = -1;
+  for (let i = 0; i < matches.length; i++) {
+    const div = document.createElement("div");
+    div.className = "autocomplete-item";
+    div.textContent = matches[i];
+    div.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      input.value = matches[i] + " ";
+      hideDropdown();
+      clearGhostText();
+      input.focus();
+    });
+    dropdown.appendChild(div);
+  }
+  dropdown.hidden = false;
+}
+
+function hideDropdown() {
+  dropdown.hidden = true;
+  dropdown.innerHTML = "";
+  dropdownItems = [];
+  dropdownIndex = -1;
+}
+
+function updateDropdownHighlight() {
+  const items = dropdown.querySelectorAll(".autocomplete-item");
+  items.forEach((el, i) => {
+    el.classList.toggle("active", i === dropdownIndex);
+  });
+}
 
 // --- Output helpers ---
 
@@ -466,7 +536,50 @@ async function executeCommandForRun(raw) {
 
 // --- REPL input handling ---
 
+function selectDropdownItem(cmd) {
+  input.value = cmd + " ";
+  hideDropdown();
+  clearGhostText();
+}
+
 input.addEventListener("keydown", (e) => {
+  // When dropdown is visible, arrow keys navigate it
+  if (!dropdown.hidden && dropdownItems.length > 0) {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      dropdownIndex = (dropdownIndex + 1) % dropdownItems.length;
+      updateDropdownHighlight();
+      return;
+    }
+    if (e.key === "ArrowUp") {
+      e.preventDefault();
+      dropdownIndex = dropdownIndex <= 0 ? dropdownItems.length - 1 : dropdownIndex - 1;
+      updateDropdownHighlight();
+      return;
+    }
+    if (e.key === "Enter" && dropdownIndex >= 0) {
+      e.preventDefault();
+      selectDropdownItem(dropdownItems[dropdownIndex]);
+      return;
+    }
+    if (e.key === "Tab") {
+      e.preventDefault();
+      if (dropdownIndex >= 0) {
+        selectDropdownItem(dropdownItems[dropdownIndex]);
+      } else if (dropdownItems.length > 0) {
+        selectDropdownItem(dropdownItems[0]);
+      }
+      return;
+    }
+    if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      hideDropdown();
+      clearGhostText();
+      return;
+    }
+  }
+
   if (e.key === "Enter") {
     const value = input.value;
     if (value.trim()) {
@@ -478,12 +591,30 @@ input.addEventListener("keydown", (e) => {
       executeCommand(value);
     }
     input.value = "";
+    hideDropdown();
+    clearGhostText();
+  } else if (e.key === "Tab") {
+    e.preventDefault();
+    const val = input.value.toLowerCase().trim();
+    if (val.includes(" ")) return;
+    if (!val) {
+      showDropdown(COMMANDS);
+      return;
+    }
+    const matches = COMMANDS.filter(cmd => cmd.startsWith(val) && cmd !== val);
+    if (matches.length === 1) {
+      selectDropdownItem(matches[0]);
+    } else if (matches.length > 1) {
+      showDropdown(matches);
+    }
   } else if (e.key === "ArrowUp") {
     e.preventDefault();
     if (historyIndex > 0) {
       historyIndex--;
       input.value = history[historyIndex];
     }
+    hideDropdown();
+    clearGhostText();
   } else if (e.key === "ArrowDown") {
     e.preventDefault();
     if (historyIndex < history.length - 1) {
@@ -493,6 +624,35 @@ input.addEventListener("keydown", (e) => {
       historyIndex = history.length;
       input.value = "";
     }
+    hideDropdown();
+    clearGhostText();
+  } else if (e.key === "Escape") {
+    hideDropdown();
+    clearGhostText();
+  } else if (e.key === " " && e.ctrlKey) {
+    e.preventDefault();
+    const val = input.value.toLowerCase().trim();
+    if (val.includes(" ")) return;
+    const matches = val
+      ? COMMANDS.filter(cmd => cmd.startsWith(val) && cmd !== val)
+      : COMMANDS;
+    if (matches.length > 0) showDropdown(matches);
+  }
+});
+
+input.addEventListener("input", () => {
+  updateGhostText();
+  // Auto-show dropdown while typing
+  const val = input.value.toLowerCase().trim();
+  if (!val || val.includes(" ")) {
+    hideDropdown();
+    return;
+  }
+  const matches = COMMANDS.filter(cmd => cmd.startsWith(val) && cmd !== val);
+  if (matches.length > 1) {
+    showDropdown(matches);
+  } else {
+    hideDropdown();
   }
 });
 
@@ -740,14 +900,21 @@ recordBtn.addEventListener("click", async () => {
 let port = null;
 
 function connectPort() {
-  port = chrome.runtime.connect({ name: `pw-panel-${inspectedTabId}` });
+  // chrome.runtime.id is undefined when the extension context is invalidated
+  // (e.g., after extension reload/update). Stop retrying in that case.
+  if (!chrome.runtime?.id) return;
+  try {
+    port = chrome.runtime.connect({ name: `pw-panel-${inspectedTabId}` });
+  } catch (e) {
+    return;
+  }
   port.onMessage.addListener((message) => {
     if (message.type === "pw-recorded-command") {
       appendToEditor(message.command);
     }
   });
   port.onDisconnect.addListener(() => {
-    // Service worker restarted — reconnect after a brief delay
+    if (!chrome.runtime?.id) return;
     setTimeout(connectPort, 500);
   });
 }
@@ -829,5 +996,5 @@ updateFileInfo();
 updateButtonStates();
 editor.focus();
 
-addInfo("Playwright REPL v0.9.2");
+addInfo("Playwright REPL v0.9.3");
 addInfo('Type commands below or open a .pw file in the editor.');
