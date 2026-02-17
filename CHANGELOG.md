@@ -1,5 +1,52 @@
 # Changelog
 
+## v0.9.2
+
+### Added
+
+- Screenshot display in terminal with Save button and click-to-enlarge lightbox
+- Lightbox close button and Save button (both top-right)
+- Lightbox Escape key handler (prevents DevTools panel from closing)
+- Export code block with Copy button in terminal output
+- Screenshot hover hint ("Click to enlarge")
+
+### Fixed
+
+- Clipboard API fallback for DevTools panels (navigator.clipboard blocked)
+
+## v0.9.1
+
+### Added
+
+- Light theme support with auto-detection (matches Chrome DevTools theme)
+- CSS custom properties for full light/dark theming
+- Step button for single-line execution like a debugger
+- Full-line highlight in editor during step/run execution
+- Console commands: `history`, `clear`, `reset` in the REPL input
+- Console header with clear button and pass/fail stats
+- Port auto-reconnect when MV3 service worker restarts (fixes recording drops)
+
+### Fixed
+
+- Recording commands now survive service worker restarts (auto-reconnect port)
+- Editor execution symbols clear properly when all text is deleted
+
+### Changed
+
+- Renamed console pane to "Terminal"
+- `history` command displays in terminal instead of appending to editor
+- 310 tests (57 panel tests added)
+
+## v0.9.0
+
+### Added
+
+- Split editor/REPL layout with draggable splitter
+- Editor pane with line numbers, syntax-aware line highlighting
+- Run button to execute all editor lines sequentially
+- Open, Save, Copy toolbar buttons for `.pw` file management
+- Record button integrated into toolbar
+
 ## v0.8.0
 
 ### Added

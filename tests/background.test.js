@@ -81,6 +81,9 @@ describe("cmdHelp", () => {
     expect(result.data).toContain("verify-element");
     expect(result.data).toContain("verify-url");
     expect(result.data).toContain("verify-title");
+    expect(result.data).toContain("history");
+    expect(result.data).toContain("clear");
+    expect(result.data).toContain("reset");
     expect(result.data).toContain("help");
   });
 });

@@ -12,7 +12,7 @@ import {
   dispatchFillEvents,
 } from "./lib/page-scripts.js";
 
-console.log("[PW] background.js loaded v0.7");
+console.log("[PW] background.js loaded v0.9.2");
 
 // Track which tabs we've attached the debugger to
 const attachedTabs = new Set();
@@ -733,6 +733,9 @@ function cmdHelp() {
     '  reload                  Reload page',
     '  export                  Export session as Playwright test',
     '  export <cmd>            Convert one command to Playwright',
+    '  history                 Show command history',
+    '  clear                   Clear terminal output',
+    '  reset                   Clear history and terminal',
     '  help                    Show this help',
   ];
   return { success: true, type: "info", data: lines.join("\n") };

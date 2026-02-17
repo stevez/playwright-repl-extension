@@ -8,27 +8,55 @@ describe("panel.js", () => {
     vi.restoreAllMocks();
     vi.resetModules();
 
-    // Set up the DOM that panel.js expects
+    // Set up the DOM that panel.js expects (split editor/REPL layout)
     document.body.innerHTML = `
-      <div id="output"></div>
-      <div id="input-bar">
-        <span id="prompt">pw&gt;</span>
-        <input type="text" id="command-input" autocomplete="off" spellcheck="false">
-        <button id="record-btn">&#9210; Record</button>
-      </div>
       <div id="toolbar">
-        <button id="load-btn">Load</button>
-        <button id="play-btn" disabled>Play</button>
-        <button id="copy-btn" disabled>Copy</button>
-        <button id="save-btn" disabled>Save</button>
-        <button id="clear-btn">Clear</button>
+        <div id="toolbar-left">
+          <button id="open-btn">Open</button>
+          <button id="save-btn" disabled>Save</button>
+          <button id="copy-btn" disabled>Copy</button>
+          <span class="toolbar-sep"></span>
+          <button id="record-btn">&#9210; Record</button>
+          <button id="run-btn">&#9654;</button>
+          <button id="step-btn">&#9655;</button>
+          <button id="export-btn" disabled>Export</button>
+        </div>
+        <div id="toolbar-right">
+          <span id="file-info"></span>
+        </div>
       </div>
+      <div id="editor-pane">
+        <div id="line-numbers"></div>
+        <div id="editor-wrapper">
+          <div id="line-highlight"></div>
+          <textarea id="editor" spellcheck="false"></textarea>
+        </div>
+      </div>
+      <div id="splitter"><div id="splitter-handle"></div></div>
+      <div id="console-pane">
+        <div id="console-header">
+          <span id="console-header-left">
+            <span id="console-title">Terminal</span>
+            <button id="console-clear-btn">Clear</button>
+          </span>
+          <span id="console-stats"></span>
+        </div>
+        <div id="output"></div>
+        <div id="input-bar">
+          <span id="prompt">pw&gt;</span>
+          <input type="text" id="command-input" autocomplete="off" spellcheck="false">
+        </div>
+      </div>
+      <div id="lightbox" hidden><button id="lightbox-close-btn">&times;</button><button id="lightbox-save-btn">Save</button><img id="lightbox-img"></div>
     `;
+
+    // Remove any theme class from previous test
+    document.body.classList.remove("theme-dark");
 
     // Mock chrome.devtools.inspectedWindow.tabId
     chrome.devtools = {
       inspectedWindow: { tabId: 42 },
-      panels: { create: vi.fn() },
+      panels: { create: vi.fn(), themeName: "default" },
     };
 
     // Mock chrome.runtime.connect to return a port-like object
@@ -42,11 +70,13 @@ describe("panel.js", () => {
     chrome.runtime.sendMessage.mockResolvedValue({ type: "success", data: "OK" });
   });
 
+  // --- Init ---
+
   it("renders welcome message on load", async () => {
     await import("../panel/panel.js");
     const output = document.getElementById("output");
-    expect(output.textContent).toContain("Playwright REPL v0.5");
-    expect(output.textContent).toContain("help");
+    expect(output.textContent).toContain("Playwright REPL v0.9.2");
+    expect(output.textContent).toContain("editor");
   });
 
   it("connects to background via port", async () => {
@@ -56,31 +86,89 @@ describe("panel.js", () => {
     });
   });
 
-  it("focuses the input on load", async () => {
-    const input = document.getElementById("command-input");
-    const focusSpy = vi.spyOn(input, "focus");
+  it("reconnects port when service worker restarts", async () => {
+    await import("../panel/panel.js");
+    // Grab the onDisconnect callback that panel.js registered
+    const disconnectCb = mockPort.onDisconnect.addListener.mock.calls[0][0];
+    // Simulate service worker restart (port disconnects)
+    vi.useFakeTimers();
+    disconnectCb();
+    vi.advanceTimersByTime(500);
+    // Should have reconnected
+    expect(chrome.runtime.connect).toHaveBeenCalledTimes(2);
+    vi.useRealTimers();
+  });
+
+  it("focuses the editor on load", async () => {
+    const editor = document.getElementById("editor");
+    const focusSpy = vi.spyOn(editor, "focus");
     await import("../panel/panel.js");
     expect(focusSpy).toHaveBeenCalled();
   });
 
-  it("has disabled copy and save buttons initially", async () => {
+  it("has disabled copy, save, and export buttons initially", async () => {
     await import("../panel/panel.js");
     expect(document.getElementById("copy-btn").disabled).toBe(true);
     expect(document.getElementById("save-btn").disabled).toBe(true);
+    expect(document.getElementById("export-btn").disabled).toBe(true);
   });
 
-  it("has enabled load and clear buttons", async () => {
+  it("has enabled open button", async () => {
     await import("../panel/panel.js");
-    expect(document.getElementById("load-btn").disabled).toBe(false);
-    expect(document.getElementById("clear-btn").disabled).toBe(false);
+    expect(document.getElementById("open-btn").disabled).toBe(false);
   });
+
+  // --- Theme ---
+
+  it("defaults to light theme (no theme-dark class)", async () => {
+    chrome.devtools.panels.themeName = "default";
+    await import("../panel/panel.js");
+    expect(document.body.classList.contains("theme-dark")).toBe(false);
+  });
+
+  it("applies dark theme when DevTools theme is dark", async () => {
+    chrome.devtools.panels.themeName = "dark";
+    await import("../panel/panel.js");
+    expect(document.body.classList.contains("theme-dark")).toBe(true);
+  });
+
+  it("applies light theme when themeName is undefined", async () => {
+    chrome.devtools.panels.themeName = undefined;
+    await import("../panel/panel.js");
+    expect(document.body.classList.contains("theme-dark")).toBe(false);
+  });
+
+  // --- Line numbers ---
+
+  it("renders line numbers for editor content", async () => {
+    await import("../panel/panel.js");
+    const editor = document.getElementById("editor");
+    editor.value = "goto https://example.com\nclick \"OK\"\npress Enter";
+    editor.dispatchEvent(new Event("input"));
+    const lineNums = document.getElementById("line-numbers");
+    const divs = lineNums.querySelectorAll("div");
+    expect(divs.length).toBe(3);
+    expect(divs[0].textContent).toBe("1");
+    expect(divs[1].textContent).toBe("2");
+    expect(divs[2].textContent).toBe("3");
+  });
+
+  it("shows file info with line count", async () => {
+    await import("../panel/panel.js");
+    const editor = document.getElementById("editor");
+    editor.value = "goto https://example.com\nclick \"OK\"";
+    editor.dispatchEvent(new Event("input"));
+    const fileInfo = document.getElementById("file-info");
+    expect(fileInfo.textContent).toContain("2 lines");
+  });
+
+  // --- REPL input ---
 
   it("sends command to background on Enter key", async () => {
     await import("../panel/panel.js");
     const input = document.getElementById("command-input");
     input.value = "help";
     input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-    // Wait for async sendMessage
     await vi.waitFor(() => {
       expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
         type: "pw-command",
@@ -105,6 +193,8 @@ describe("panel.js", () => {
     input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
     expect(chrome.runtime.sendMessage).not.toHaveBeenCalled();
   });
+
+  // --- Response display ---
 
   it("displays success response in output", async () => {
     chrome.runtime.sendMessage.mockResolvedValue({ type: "success", data: "Navigated to https://example.com" });
@@ -202,6 +292,8 @@ describe("panel.js", () => {
     expect(chrome.runtime.sendMessage).not.toHaveBeenCalled();
   });
 
+  // --- History ---
+
   it("navigates command history with ArrowUp/ArrowDown", async () => {
     await import("../panel/panel.js");
     const input = document.getElementById("command-input");
@@ -229,57 +321,94 @@ describe("panel.js", () => {
     expect(input.value).toBe("");
   });
 
-  it("clear button clears output and disables copy/save", async () => {
-    chrome.runtime.sendMessage.mockResolvedValue({ type: "success", data: "Done" });
-    await import("../panel/panel.js");
-    const input = document.getElementById("command-input");
-    // Execute a command so copy/save become enabled
-    input.value = "help";
-    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-    await vi.waitFor(() => {
-      expect(document.getElementById("copy-btn").disabled).toBe(false);
-    });
+  // --- Copy/Save/Export tied to editor ---
 
-    // Click clear
-    document.getElementById("clear-btn").click();
-    const output = document.getElementById("output");
-    expect(output.innerHTML).toBe("");
+  it("enables copy, save, export when editor has content", async () => {
+    await import("../panel/panel.js");
+    const editor = document.getElementById("editor");
+    editor.value = "goto https://example.com";
+    editor.dispatchEvent(new Event("input"));
+
+    expect(document.getElementById("copy-btn").disabled).toBe(false);
+    expect(document.getElementById("save-btn").disabled).toBe(false);
+    expect(document.getElementById("export-btn").disabled).toBe(false);
+  });
+
+  it("disables copy, save, export when editor is empty", async () => {
+    await import("../panel/panel.js");
+    const editor = document.getElementById("editor");
+    editor.value = "goto https://example.com";
+    editor.dispatchEvent(new Event("input"));
+    expect(document.getElementById("copy-btn").disabled).toBe(false);
+
+    editor.value = "";
+    editor.dispatchEvent(new Event("input"));
     expect(document.getElementById("copy-btn").disabled).toBe(true);
     expect(document.getElementById("save-btn").disabled).toBe(true);
+    expect(document.getElementById("export-btn").disabled).toBe(true);
   });
 
-  it("enables copy and save after executing a command", async () => {
-    chrome.runtime.sendMessage.mockResolvedValue({ type: "success", data: "OK" });
+  // --- Copy ---
+
+  it("copy button copies editor content to clipboard", async () => {
+    document.execCommand = vi.fn().mockReturnValue(true);
     await import("../panel/panel.js");
-    const input = document.getElementById("command-input");
-    input.value = "goto https://example.com";
-    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-    await vi.waitFor(() => {
-      expect(document.getElementById("copy-btn").disabled).toBe(false);
-      expect(document.getElementById("save-btn").disabled).toBe(false);
-    });
+    const editor = document.getElementById("editor");
+    editor.value = "goto https://example.com\nclick \"OK\"";
+    editor.dispatchEvent(new Event("input"));
+
+    document.getElementById("copy-btn").click();
+    expect(document.execCommand).toHaveBeenCalledWith("copy");
+    expect(document.getElementById("output").textContent).toContain("copied");
   });
 
-  it("export command generates Playwright code", async () => {
-    chrome.runtime.sendMessage.mockResolvedValue({ type: "success", data: "OK" });
+  it("copy button shows message when editor is empty", async () => {
     await import("../panel/panel.js");
+    document.getElementById("copy-btn").disabled = false;
+    document.getElementById("copy-btn").click();
+    expect(document.getElementById("output").textContent).toContain("Nothing to copy");
+  });
+
+  // --- Export ---
+
+  it("export button converts editor to Playwright code", async () => {
+    await import("../panel/panel.js");
+    document.execCommand = vi.fn().mockReturnValue(true);
+    const editor = document.getElementById("editor");
+    editor.value = "goto https://example.com\nclick \"Submit\"";
+    editor.dispatchEvent(new Event("input"));
+
+    document.getElementById("export-btn").click();
+    const output = document.getElementById("output");
+    const codeBlock = output.querySelector(".code-block");
+    expect(codeBlock).not.toBeNull();
+    expect(codeBlock.textContent).toContain("@playwright/test");
+    expect(codeBlock.querySelector(".code-copy-btn")).not.toBeNull();
+  });
+
+  it("export command in REPL reads from editor", async () => {
+    await import("../panel/panel.js");
+    document.execCommand = vi.fn().mockReturnValue(true);
+    const editor = document.getElementById("editor");
+    editor.value = "goto https://example.com";
+    editor.dispatchEvent(new Event("input"));
+
     const input = document.getElementById("command-input");
-
-    // Execute some commands first
-    input.value = "goto https://example.com";
-    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-    await vi.waitFor(() => {
-      expect(document.getElementById("output").textContent).toContain("OK");
-    });
-
-    // Run export
     input.value = "export";
     input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-    await vi.waitFor(() => {
-      const output = document.getElementById("output");
-      expect(output.textContent).toContain("Playwright TypeScript");
-      expect(output.textContent).toContain("@playwright/test");
-    });
+    const output = document.getElementById("output");
+    const codeBlock = output.querySelector(".code-block");
+    expect(codeBlock).not.toBeNull();
+    expect(codeBlock.textContent).toContain("@playwright/test");
+  });
+
+  it("export shows nothing when editor is empty", async () => {
+    await import("../panel/panel.js");
+    const input = document.getElementById("command-input");
+    input.value = "export";
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    const output = document.getElementById("output");
+    expect(output.textContent).toContain("Nothing to export");
   });
 
   it("export single command converts to Playwright", async () => {
@@ -291,21 +420,13 @@ describe("panel.js", () => {
     expect(output.textContent).toContain("click");
   });
 
-  it("export with empty log shows nothing to export", async () => {
-    await import("../panel/panel.js");
-    const input = document.getElementById("command-input");
-    input.value = "export";
-    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-    const output = document.getElementById("output");
-    expect(output.textContent).toContain("Nothing to export");
-  });
+  // --- Recording ---
 
   it("record button toggles recording state", async () => {
     chrome.runtime.sendMessage.mockResolvedValue({ success: true });
     await import("../panel/panel.js");
     const recordBtn = document.getElementById("record-btn");
 
-    // Click to start recording
     recordBtn.click();
     await vi.waitFor(() => {
       expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
@@ -322,13 +443,11 @@ describe("panel.js", () => {
     await import("../panel/panel.js");
     const recordBtn = document.getElementById("record-btn");
 
-    // Start recording
     recordBtn.click();
     await vi.waitFor(() => {
       expect(recordBtn.classList.contains("recording")).toBe(true);
     });
 
-    // Stop recording
     recordBtn.click();
     await vi.waitFor(() => {
       expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
@@ -353,41 +472,414 @@ describe("panel.js", () => {
     expect(document.getElementById("output").textContent).toContain("Failed to start recording");
   });
 
-  it("port receives recorded commands and displays them", async () => {
+  it("recorded commands append to editor", async () => {
     await import("../panel/panel.js");
-    // Get the onMessage listener that was registered
     const onMessageCallback = mockPort.onMessage.addListener.mock.calls[0][0];
     onMessageCallback({ type: "pw-recorded-command", command: 'click "Submit"' });
-    const output = document.getElementById("output");
-    expect(output.textContent).toContain('click "Submit"');
-    // Command should be logged, enabling copy/save
+    const editor = document.getElementById("editor");
+    expect(editor.value).toContain('click "Submit"');
+    // Editor content enables copy/save
     expect(document.getElementById("copy-btn").disabled).toBe(false);
   });
 
-  it("copy button copies commands to clipboard", async () => {
-    // Mock execCommand for clipboard
-    document.execCommand = vi.fn().mockReturnValue(true);
+  // --- Run button ---
 
+  it("run button executes editor lines", async () => {
+    chrome.runtime.sendMessage.mockResolvedValue({ type: "success", data: "OK" });
+    await import("../panel/panel.js");
+    const editor = document.getElementById("editor");
+    editor.value = "goto https://example.com\nclick \"OK\"";
+    editor.dispatchEvent(new Event("input"));
+
+    document.getElementById("run-btn").click();
+    await vi.waitFor(() => {
+      const output = document.getElementById("output");
+      expect(output.textContent).toContain("Running script...");
+      expect(output.textContent).toContain("Run complete.");
+    });
+
+    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
+      type: "pw-command",
+      raw: "goto https://example.com",
+      tabId: 42,
+    });
+    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
+      type: "pw-command",
+      raw: 'click "OK"',
+      tabId: 42,
+    });
+  });
+
+  it("run button shows pass/fail stats", async () => {
+    let callCount = 0;
+    chrome.runtime.sendMessage.mockImplementation(() => {
+      callCount++;
+      if (callCount === 1) return Promise.resolve({ type: "success", data: "OK" });
+      return Promise.resolve({ type: "error", data: "Not found" });
+    });
+    await import("../panel/panel.js");
+    const editor = document.getElementById("editor");
+    editor.value = "goto https://example.com\nclick \"Missing\"";
+    editor.dispatchEvent(new Event("input"));
+
+    document.getElementById("run-btn").click();
+    await vi.waitFor(() => {
+      const stats = document.getElementById("console-stats");
+      expect(stats.textContent).toContain("1 passed");
+      expect(stats.textContent).toContain("1 failed");
+    });
+  });
+
+  it("run button shows message for empty editor", async () => {
+    await import("../panel/panel.js");
+    document.getElementById("run-btn").click();
+    const output = document.getElementById("output");
+    expect(output.textContent).toContain("Editor is empty");
+  });
+
+  it("run button skips empty lines and comments", async () => {
+    chrome.runtime.sendMessage.mockResolvedValue({ type: "success", data: "OK" });
+    await import("../panel/panel.js");
+    const editor = document.getElementById("editor");
+    editor.value = "# comment\n\ngoto https://example.com";
+    editor.dispatchEvent(new Event("input"));
+
+    document.getElementById("run-btn").click();
+    await vi.waitFor(() => {
+      expect(document.getElementById("output").textContent).toContain("Run complete.");
+    });
+    // Only goto should be sent as pw-command, comment is displayed locally
+    const pwCalls = chrome.runtime.sendMessage.mock.calls.filter(
+      (c) => c[0].type === "pw-command"
+    );
+    expect(pwCalls.length).toBe(1);
+    expect(pwCalls[0][0].raw).toBe("goto https://example.com");
+  });
+
+  // --- Ctrl+Enter ---
+
+  it("Ctrl+Enter in editor triggers run", async () => {
+    chrome.runtime.sendMessage.mockResolvedValue({ type: "success", data: "OK" });
+    await import("../panel/panel.js");
+    const editor = document.getElementById("editor");
+    editor.value = "goto https://example.com";
+    editor.dispatchEvent(new Event("input"));
+
+    editor.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "Enter",
+      ctrlKey: true,
+      bubbles: true,
+    }));
+
+    await vi.waitFor(() => {
+      expect(document.getElementById("output").textContent).toContain("Running script...");
+    });
+  });
+
+  // --- Console commands (history, clear, reset) ---
+
+  it("history command displays history in terminal", async () => {
     chrome.runtime.sendMessage.mockResolvedValue({ type: "success", data: "OK" });
     await import("../panel/panel.js");
     const input = document.getElementById("command-input");
 
-    input.value = "goto https://example.com";
+    // Execute some commands to build history
+    input.value = "help";
     input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    input.value = "snapshot";
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+
     await vi.waitFor(() => {
-      expect(document.getElementById("copy-btn").disabled).toBe(false);
+      expect(chrome.runtime.sendMessage).toHaveBeenCalledTimes(2);
     });
 
-    document.getElementById("copy-btn").click();
-    expect(document.execCommand).toHaveBeenCalledWith("copy");
-    expect(document.getElementById("output").textContent).toContain("copied");
+    // Now run the history command
+    input.value = "history";
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+
+    const output = document.getElementById("output");
+    expect(output.textContent).toContain("help");
+    expect(output.textContent).toContain("snapshot");
+    // Should NOT append to editor
+    expect(document.getElementById("editor").value).toBe("");
   });
 
-  it("copy button shows message when nothing to copy", async () => {
+  it("history command shows info when history is empty", async () => {
     await import("../panel/panel.js");
-    // Force enable the button to test the empty-log path
-    document.getElementById("copy-btn").disabled = false;
-    document.getElementById("copy-btn").click();
-    expect(document.getElementById("output").textContent).toContain("Nothing to copy");
+    const input = document.getElementById("command-input");
+
+    input.value = "history";
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+
+    expect(document.getElementById("output").textContent).toContain("No command history");
+  });
+
+  it("history command is not added to history itself", async () => {
+    chrome.runtime.sendMessage.mockResolvedValue({ type: "success", data: "OK" });
+    await import("../panel/panel.js");
+    const input = document.getElementById("command-input");
+
+    input.value = "help";
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+
+    input.value = "history";
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+
+    // ArrowUp should show "help", not "history"
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
+    expect(input.value).toBe("help");
+  });
+
+  it("history command is not sent to background", async () => {
+    await import("../panel/panel.js");
+    const input = document.getElementById("command-input");
+
+    input.value = "history";
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+
+    expect(chrome.runtime.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("clear command clears console output", async () => {
+    chrome.runtime.sendMessage.mockResolvedValue({ type: "success", data: "Done" });
+    await import("../panel/panel.js");
+    const input = document.getElementById("command-input");
+
+    input.value = "help";
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    await vi.waitFor(() => {
+      expect(document.getElementById("output").textContent).toContain("Done");
+    });
+
+    input.value = "clear";
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+
+    expect(document.getElementById("output").innerHTML).toBe("");
+  });
+
+  it("clear command is not sent to background", async () => {
+    await import("../panel/panel.js");
+    chrome.runtime.sendMessage.mockClear();
+    const input = document.getElementById("command-input");
+
+    input.value = "clear";
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+
+    expect(chrome.runtime.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("clear command is not added to history", async () => {
+    chrome.runtime.sendMessage.mockResolvedValue({ type: "success", data: "OK" });
+    await import("../panel/panel.js");
+    const input = document.getElementById("command-input");
+
+    input.value = "help";
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+
+    input.value = "clear";
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
+    expect(input.value).toBe("help");
+  });
+
+  it("reset command clears history and console", async () => {
+    chrome.runtime.sendMessage.mockResolvedValue({ type: "success", data: "Done" });
+    await import("../panel/panel.js");
+    const input = document.getElementById("command-input");
+
+    // Build up some history
+    input.value = "help";
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    await vi.waitFor(() => {
+      expect(document.getElementById("output").textContent).toContain("Done");
+    });
+
+    input.value = "reset";
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+
+    expect(document.getElementById("output").textContent).toContain("History and terminal cleared");
+
+    // History should be empty — ArrowUp should do nothing
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
+    expect(input.value).toBe("");
+  });
+
+  it("reset command is not added to history", async () => {
+    chrome.runtime.sendMessage.mockResolvedValue({ type: "success", data: "OK" });
+    await import("../panel/panel.js");
+    const input = document.getElementById("command-input");
+
+    input.value = "help";
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+
+    input.value = "reset";
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+
+    // After reset, history should be empty
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
+    expect(input.value).toBe("");
+  });
+
+  // --- Console header clear button ---
+
+  it("console header clear button clears output", async () => {
+    chrome.runtime.sendMessage.mockResolvedValue({ type: "success", data: "Done" });
+    await import("../panel/panel.js");
+    const input = document.getElementById("command-input");
+    input.value = "help";
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    await vi.waitFor(() => {
+      expect(document.getElementById("output").textContent).toContain("Done");
+    });
+
+    document.getElementById("console-clear-btn").click();
+    expect(document.getElementById("output").innerHTML).toBe("");
+  });
+
+  it("console header clear button resets pass/fail stats", async () => {
+    let callCount = 0;
+    chrome.runtime.sendMessage.mockImplementation(() => {
+      callCount++;
+      if (callCount === 1) return Promise.resolve({ type: "success", data: "OK" });
+      return Promise.resolve({ type: "error", data: "Not found" });
+    });
+    await import("../panel/panel.js");
+    const editor = document.getElementById("editor");
+    editor.value = "goto https://example.com\nclick \"Missing\"";
+    editor.dispatchEvent(new Event("input"));
+
+    document.getElementById("run-btn").click();
+    await vi.waitFor(() => {
+      const stats = document.getElementById("console-stats");
+      expect(stats.textContent).toContain("1 passed");
+    });
+
+    document.getElementById("console-clear-btn").click();
+    expect(document.getElementById("console-stats").textContent).toBe("");
+  });
+
+  // --- Step button ---
+
+  it("step button executes the first executable line", async () => {
+    chrome.runtime.sendMessage.mockResolvedValue({ type: "success", data: "OK" });
+    await import("../panel/panel.js");
+    const editor = document.getElementById("editor");
+    editor.value = "goto https://example.com\nclick \"OK\"";
+    editor.dispatchEvent(new Event("input"));
+
+    document.getElementById("step-btn").click();
+    await vi.waitFor(() => {
+      expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
+        type: "pw-command",
+        raw: "goto https://example.com",
+        tabId: 42,
+      });
+    });
+  });
+
+  it("step button skips empty lines and comments", async () => {
+    chrome.runtime.sendMessage.mockResolvedValue({ type: "success", data: "OK" });
+    await import("../panel/panel.js");
+    const editor = document.getElementById("editor");
+    editor.value = "# comment\n\ngoto https://example.com";
+    editor.dispatchEvent(new Event("input"));
+
+    document.getElementById("step-btn").click();
+    await vi.waitFor(() => {
+      expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
+        type: "pw-command",
+        raw: "goto https://example.com",
+        tabId: 42,
+      });
+    });
+  });
+
+  it("step button advances to next line on subsequent clicks", async () => {
+    chrome.runtime.sendMessage.mockResolvedValue({ type: "success", data: "OK" });
+    await import("../panel/panel.js");
+    const editor = document.getElementById("editor");
+    editor.value = "goto https://example.com\nclick \"OK\"";
+    editor.dispatchEvent(new Event("input"));
+
+    document.getElementById("step-btn").click();
+    await vi.waitFor(() => {
+      expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
+        type: "pw-command",
+        raw: "goto https://example.com",
+        tabId: 42,
+      });
+    });
+
+    // Wait for step button to be re-enabled (async handler complete)
+    await vi.waitFor(() => {
+      expect(document.getElementById("step-btn").disabled).toBe(false);
+    });
+
+    chrome.runtime.sendMessage.mockClear();
+    document.getElementById("step-btn").click();
+    await vi.waitFor(() => {
+      expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
+        type: "pw-command",
+        raw: 'click "OK"',
+        tabId: 42,
+      });
+    });
+  });
+
+  it("step button shows message for empty editor", async () => {
+    await import("../panel/panel.js");
+    document.getElementById("step-btn").click();
+    expect(document.getElementById("output").textContent).toContain("Editor is empty");
+  });
+
+  it("step button shows complete message after last line", async () => {
+    chrome.runtime.sendMessage.mockResolvedValue({ type: "success", data: "OK" });
+    await import("../panel/panel.js");
+    const editor = document.getElementById("editor");
+    editor.value = "goto https://example.com";
+    editor.dispatchEvent(new Event("input"));
+
+    document.getElementById("step-btn").click();
+    await vi.waitFor(() => {
+      expect(document.getElementById("output").textContent).toContain("Step complete");
+    });
+  });
+
+  it("step state resets when editor content changes", async () => {
+    chrome.runtime.sendMessage.mockResolvedValue({ type: "success", data: "OK" });
+    await import("../panel/panel.js");
+    const editor = document.getElementById("editor");
+    editor.value = "goto https://example.com\nclick \"OK\"";
+    editor.dispatchEvent(new Event("input"));
+
+    document.getElementById("step-btn").click();
+    await vi.waitFor(() => {
+      expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
+        type: "pw-command",
+        raw: "goto https://example.com",
+        tabId: 42,
+      });
+    });
+
+    // Wait for step button to be re-enabled
+    await vi.waitFor(() => {
+      expect(document.getElementById("step-btn").disabled).toBe(false);
+    });
+
+    // Edit the content — step state should reset
+    editor.value = "goto https://other.com";
+    editor.dispatchEvent(new Event("input"));
+
+    // Next step should start from line 0 again
+    chrome.runtime.sendMessage.mockClear();
+    document.getElementById("step-btn").click();
+    await vi.waitFor(() => {
+      expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
+        type: "pw-command",
+        raw: "goto https://other.com",
+        tabId: 42,
+      });
+    });
   });
 });
